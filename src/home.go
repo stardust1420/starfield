@@ -82,6 +82,11 @@ type homeModel struct {
 	filter      filterBar
 	runningOnly bool
 	stars       *starfield // the empty-state sky; nil until the size is known
+
+	previewOpen    bool   // the p panel is shown
+	previewName    string // tmux name the preview content was captured from
+	previewContent string
+	previewErr     string
 }
 
 func InitHomeModel(d Deps, width, height int) homeModel {
@@ -176,7 +181,11 @@ func (m homeModel) busyGlyph() string {
 // layout fits the grid to the window: full page width, and whatever height
 // is left after the header, the help and any confirmation.
 func (m *homeModel) layout() {
-	m.grid.resize(pageWidth(m.width), listGridHeight(m.height, lipgloss.Height(m.bottomLeft()), m.confirm != nil))
+	panel := 0
+	if m.previewOpen {
+		panel = previewLines
+	}
+	m.grid.resize(pageWidth(m.width), listGridHeightWith(m.height, lipgloss.Height(m.bottomLeft()), m.confirm != nil, panel))
 }
 
 // bottomLeft is the help, or the filter field while it is being edited.
@@ -229,7 +238,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.discErr = ""
 		}
 		m.rebuild()
-		return m, tea.Batch(cmd, tickCmd(m.tickID))
+		return m, tea.Batch(cmd, tickCmd(m.tickID), m.previewCmd())
 
 	case frameMsg:
 		if msg.id != m.tickID {
@@ -270,6 +279,10 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		refresh := m.refreshCmd()
 		return m, tea.Batch(cmd, refresh)
+
+	case previewMsg:
+		m.applyPreview(msg)
+		return m, nil
 
 	case clearStatusMsg:
 		m.status.clear(msg, m.tickID)
@@ -324,9 +337,18 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.stopKey()
 	case key.Matches(msg, m.keys.New):
 		return m.newKey()
-	// p (preview) lands in Task 10.
+	case key.Matches(msg, m.keys.Preview):
+		m.previewOpen = !m.previewOpen
+		m.previewName, m.previewContent, m.previewErr = "", "", ""
+		m.layout()
+		return m, m.previewCmd()
 	default:
+		before := m.previewTarget()
 		m.grid.handleKey(msg)
+		if m.previewOpen && m.previewTarget() != before {
+			m.previewName, m.previewContent, m.previewErr = "", "", ""
+			return m, m.previewCmd()
+		}
 	}
 	return m, nil
 }
@@ -346,6 +368,12 @@ func (m homeModel) View() string {
 	panel := ""
 	if m.confirm != nil {
 		panel = renderConfirmPanel(w, m.confirm)
+	}
+	if m.previewOpen {
+		if panel != "" {
+			panel += "\n"
+		}
+		panel += m.previewView(w)
 	}
 	bottom := renderBottomBar(w, m.bottomLeft(), m.status.render(), m.status.kind == statusError)
 	return renderGridPage(header, m.grid.view(empty), panel, bottom)

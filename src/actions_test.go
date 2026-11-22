@@ -20,6 +20,10 @@ type fakeOps struct {
 	argvs  [][]string
 	killed []string
 	newErr error
+
+	capture      string
+	captureErr   error
+	captureLines int
 }
 
 func (f *fakeOps) AttachCmd(name string) *exec.Cmd { return exec.Command("true") }
@@ -28,6 +32,10 @@ func (f *fakeOps) NewSession(name, dir, id string, argv []string, w, h int) erro
 	f.dirs = append(f.dirs, dir)
 	f.argvs = append(f.argvs, argv)
 	return f.newErr
+}
+func (f *fakeOps) Capture(name string, lines int) (string, error) {
+	f.captureLines = lines
+	return f.capture, f.captureErr
 }
 func (f *fakeOps) Kill(name string) error { f.killed = append(f.killed, name); return nil }
 

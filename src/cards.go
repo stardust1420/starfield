@@ -410,9 +410,20 @@ func (g gridView) renderCard(i, width, bodyLines int) string {
 // window minus the header, the blank lines around the grid, the help or
 // field at the bottom and, while one is open, the confirmation panel.
 func listGridHeight(windowHeight, bottomLines int, confirming bool) int {
-	used := 1 + 1 + bottomLines // header, blank, bottom
+	return listGridHeightWith(windowHeight, bottomLines, confirming, 0)
+}
+
+// listGridHeightWith is listGridHeight with an extra panel of previewLines
+// lines (the live preview) under the grid. Any panel takes the place of the
+// blank line above the bottom bar.
+func listGridHeightWith(windowHeight, bottomLines int, confirming bool, previewLines int) int {
+	panels := previewLines
 	if confirming {
-		used += detailsLines + 2
+		panels += detailsLines + 2
+	}
+	used := 1 + 1 + bottomLines // header, blank, bottom
+	if panels > 0 {
+		used += panels
 	} else {
 		used++ // the blank line above the bottom bar
 	}

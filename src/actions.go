@@ -20,6 +20,7 @@ type sessionOps interface {
 	AttachCmd(name string) *exec.Cmd
 	NewSession(name, dir, id string, argv []string, w, h int) error
 	Kill(name string) error
+	Capture(name string, lines int) (string, error)
 }
 
 // attachDoneMsg is sent when the attached tmux client returns (detached, or
