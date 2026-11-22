@@ -110,6 +110,10 @@ var homeKeys = homeKeyMap{
 	Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
 	HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+	actions: []key.Binding{
+		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
+		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
+	},
 }
 
 func (k homeKeyMap) ShortHelp() []key.Binding {

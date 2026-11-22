@@ -1,7 +1,9 @@
 package src
 
 import (
+	"errors"
 	"os"
+	"os/exec"
 	"sync"
 	"time"
 
@@ -56,6 +58,7 @@ func discoverCmd(d *sessions.Discoverer, id int) tea.Cmd {
 // to list, the starfield.
 type homeModel struct {
 	deps          Deps
+	ops           sessionOps // nil when tmux is unavailable
 	help          help.Model
 	keys          homeKeyMap
 	width, height int
@@ -93,6 +96,9 @@ func InitHomeModel(d Deps, width, height int) homeModel {
 		tickID: newTickID(),
 		filter: newFilterBar(),
 		stars:  newHomeStarfield(width, height),
+	}
+	if d.Tmux != nil {
+		m.ops = d.Tmux
 	}
 	m.layout()
 	return m
@@ -237,6 +243,31 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, frameCmd(m.tickID)
 
+	case startedMsg:
+		return m, attachCmd(m.ops, msg.name)
+
+	case startFailedMsg:
+		return m, m.setStatus(statusError, msg.err.Error())
+
+	case attachDoneMsg:
+		var cmd tea.Cmd
+		var ee *exec.ExitError
+		if msg.err != nil && !errors.As(msg.err, &ee) {
+			cmd = m.setStatus(statusError, "attach: "+msg.err.Error())
+		}
+		refresh := m.refreshCmd()
+		return m, tea.Batch(cmd, refresh)
+
+	case actionMsg:
+		var cmd tea.Cmd
+		if msg.err != nil {
+			cmd = m.setStatus(statusError, msg.err.Error())
+		} else {
+			cmd = m.setStatus(statusSuccess, msg.done)
+		}
+		refresh := m.refreshCmd()
+		return m, tea.Batch(cmd, refresh)
+
 	case clearStatusMsg:
 		m.status.clear(msg, m.tickID)
 		return m, nil
@@ -284,9 +315,11 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.filter.clear()
 			m.rebuild()
 		}
-	// Session actions land here: enter (attach / resume) and x (stop) in
-	// Task 8, n (new-session picker) in Task 9, p (preview) in Task 10.
-	// Each acts on m.selected().
+	case msg.String() == "enter":
+		return m.enterKey()
+	case msg.String() == "x":
+		return m.stopKey()
+	// n (new-session picker) lands in Task 9, p (preview) in Task 10.
 	default:
 		m.grid.handleKey(msg)
 	}
