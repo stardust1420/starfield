@@ -43,7 +43,8 @@ Environment:
   STARFIELD_HISTORY_DAYS=14     How many days of stopped sessions to list
   STARFIELD_DETACH_KEY=C-]      Key (tmux syntax) that returns to the home screen
   STARFIELD_CLAUDE_CMD="caffeinate -is claude"
-                                Command that launches Claude (split on spaces)
+                                Command that launches Claude (split on spaces;
+                                default "claude" outside macOS)
   STARFIELD_REDUCED_MOTION=1    Keep the starfield still
 
 Press ? inside the app for keybindings.

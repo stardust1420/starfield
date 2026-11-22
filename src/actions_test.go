@@ -17,9 +17,13 @@ import (
 type fakeOps struct {
 	names  []string
 	dirs   []string
+	ids    []string
 	argvs  [][]string
 	killed []string
 	newErr error
+	// newErrs, when set, is the error NewSession returns for a given name
+	// (nil for names it doesn't list), instead of newErr.
+	newErrs map[string]error
 
 	capture      string
 	captureErr   error
@@ -30,7 +34,11 @@ func (f *fakeOps) AttachCmd(name string) *exec.Cmd { return exec.Command("true")
 func (f *fakeOps) NewSession(name, dir, id string, argv []string, w, h int) error {
 	f.names = append(f.names, name)
 	f.dirs = append(f.dirs, dir)
+	f.ids = append(f.ids, id)
 	f.argvs = append(f.argvs, argv)
+	if f.newErrs != nil {
+		return f.newErrs[name]
+	}
 	return f.newErr
 }
 func (f *fakeOps) Capture(name string, lines int) (string, error) {
@@ -247,12 +255,72 @@ func TestDoubleEnterStartsOnce(t *testing.T) {
 	}
 }
 
-func TestDuplicateSessionErrorAttachesAnyway(t *testing.T) {
-	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: sf-12345678")}
+// After /clear the running pane sf-<old8> carries a new id, so resuming the
+// old id hits "duplicate session": retry once under a suffixed name instead
+// of attaching to a different conversation.
+func TestResumeDuplicateNameRetriesWithSuffix(t *testing.T) {
+	f := &fakeOps{newErrs: map[string]error{
+		"sf-12345678": errors.New("new-session: exit 1: duplicate session: sf-12345678"),
+	}}
 	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
-	if got, ok := msg.(startedMsg); !ok || got.name != "sf-12345678" {
-		t.Errorf("msg = %#v; want startedMsg", msg)
+	got, ok := msg.(startedMsg)
+	if !ok || !regexp.MustCompile(`^sf-12345678-[0-9a-f]{4}$`).MatchString(got.name) {
+		t.Fatalf("msg = %#v; want startedMsg with a suffixed name", msg)
 	}
+	if len(f.names) != 2 || f.names[0] != "sf-12345678" || f.names[1] != got.name {
+		t.Errorf("NewSession names = %v", f.names)
+	}
+	want := []string{"caffeinate", "-is", "claude", "--resume", testID}
+	for i := range f.argvs {
+		if !reflect.DeepEqual(f.argvs[i], want) || f.ids[i] != testID {
+			t.Errorf("call %d: argv %v id %q; want %v %q", i, f.argvs[i], f.ids[i], want, testID)
+		}
+	}
+
+	// The guard is keyed by the base name and must be cleared by the
+	// suffixed start.
+	m := homeWith(t, f, sessions.Session{ID: testID, Dir: t.TempDir(), Title: "t", State: sessions.Stopped})
+	m.markStarting("sf-12345678")
+	next, cmd := m.Update(got)
+	if len(next.(homeModel).starting) != 0 || cmd == nil {
+		t.Errorf("starting = %v, cmd nil=%v; want cleared and an attach", next.(homeModel).starting, cmd == nil)
+	}
+}
+
+func TestResumeDuplicateRetryFailureReported(t *testing.T) {
+	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: x")}
+	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
+	if got, ok := msg.(startFailedMsg); !ok || got.name != "sf-12345678" {
+		t.Fatalf("msg = %#v; want startFailedMsg for the base name", msg)
+	}
+	if len(f.names) != 2 {
+		t.Errorf("NewSession calls = %v; want exactly one retry", f.names)
+	}
+}
+
+func TestStartDuplicateDoesNotRetry(t *testing.T) {
+	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: x")}
+	msg := startWithID(f, testCfg(), "/x", testID, 80, 24)()
+	if _, ok := msg.(startFailedMsg); !ok || len(f.names) != 1 {
+		t.Fatalf("msg = %#v, calls %v; want startFailedMsg after one call", msg, f.names)
+	}
+}
+
+func TestRefreshWhileInFlightReturnsNil(t *testing.T) {
+	m := InitHomeModel(Deps{Cfg: testCfg()}, 100, 30)
+	next, cmd := m.Update(tickMsg{id: m.tickID})
+	m = next.(homeModel)
+	if cmd == nil || !m.inFlight {
+		t.Fatal("tick should start a discovery")
+	}
+	if c := m.refreshCmd(); c != nil {
+		t.Error("refreshCmd while a discovery is in flight should return nil")
+	}
+	next, cmd = m.Update(attachDoneMsg{name: "x"})
+	if cmd != nil {
+		t.Errorf("attachDone during a discovery started another: %#v", runAll(cmd))
+	}
+	_ = next
 }
 
 func TestErrorStatusReadableAtNarrowWidths(t *testing.T) {

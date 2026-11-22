@@ -93,6 +93,13 @@ func TestTmuxLifecycle(t *testing.T) {
 	if _, err := c.Capture("sf-test", 10); err != nil {
 		t.Fatal(err)
 	}
+	// Targets are exact: a prefix of the name must not match.
+	if err := c.Kill("sf-tes"); err == nil {
+		t.Error("Kill(sf-tes) matched sf-test")
+	}
+	if _, err := c.Capture("sf-tes", 10); err == nil {
+		t.Error("Capture(sf-tes) matched sf-test")
+	}
 	if err := c.Kill("sf-test"); err != nil {
 		t.Fatal(err)
 	}

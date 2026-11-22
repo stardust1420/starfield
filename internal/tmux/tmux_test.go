@@ -53,8 +53,8 @@ func TestNewSessionArgv(t *testing.T) {
 	cat := func(a ...string) []string { return append(append([]string{}, pre...), a...) }
 	want := [][]string{
 		cat("new-session", "-d", "-s", "sf-1", "-c", "/d", "-x", "80", "-y", "24", "--", "claude", "--resume", "id-1"),
-		cat("set-option", "-t", "sf-1", "@sf_session", "id-1"),
-		cat("set-option", "-t", "sf-1", "@sf_dir", "/d"),
+		cat("set-option", "-t", "=sf-1:", "@sf_session", "id-1"),
+		cat("set-option", "-t", "=sf-1:", "@sf_dir", "/d"),
 	}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("got %v\nwant %v", calls, want)
@@ -73,8 +73,32 @@ func TestAttachCmdDropsTMUXEnv(t *testing.T) {
 	if len(cmd.Env) == 0 {
 		t.Fatal("env empty")
 	}
-	want := []string{"/bin/tmux", "-L", "starfield", "-f", "/x/tmux.conf", "attach-session", "-t", "sf-1"}
+	want := []string{"/bin/tmux", "-L", "starfield", "-f", "/x/tmux.conf", "attach-session", "-t", "=sf-1"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("got %v", cmd.Args)
+	}
+}
+
+func TestKillAndCaptureTargetsAnchored(t *testing.T) {
+	var calls [][]string
+	c := &Client{Bin: "tmux", Socket: "starfield", ConfPath: "/x/tmux.conf"}
+	c.run = func(args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		return nil, nil
+	}
+	if err := c.Kill("sf-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Capture("sf-1", 10); err != nil {
+		t.Fatal(err)
+	}
+	pre := []string{"-L", "starfield", "-f", "/x/tmux.conf"}
+	cat := func(a ...string) []string { return append(append([]string{}, pre...), a...) }
+	want := [][]string{
+		cat("kill-session", "-t", "=sf-1"),
+		cat("capture-pane", "-p", "-e", "-t", "=sf-1:", "-S", "-10"),
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("got %v\nwant %v", calls, want)
 	}
 }

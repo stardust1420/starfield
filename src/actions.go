@@ -30,8 +30,10 @@ type attachDoneMsg struct {
 	err  error
 }
 
-// startedMsg means the tmux session now exists and can be attached.
-type startedMsg struct{ name string }
+// startedMsg means the tmux session name now exists and can be attached.
+// guard is the name the starting guard was set under (name, or the base
+// name a suffixed retry replaced).
+type startedMsg struct{ name, guard string }
 
 // startFailedMsg means creating the tmux session failed.
 type startFailedMsg struct {
@@ -55,20 +57,40 @@ func claudeArgv(cfg config.Config, extra ...string) []string {
 func newSessionCmd(ops sessionOps, name, dir, id string, argv []string, w, h int) tea.Cmd {
 	return func() tea.Msg {
 		if err := ops.NewSession(name, dir, id, argv, w, h); err != nil {
-			// The session already exists (a second start raced the first):
-			// attach to it.
-			if strings.Contains(err.Error(), "duplicate session") {
-				return startedMsg{name: name}
-			}
 			return startFailedMsg{name: name, err: err}
 		}
-		return startedMsg{name: name}
+		return startedMsg{name: name, guard: name}
 	}
 }
 
 // resumeCmd starts a detached tmux session running `claude --resume <id>`.
+// If the name is taken (after /clear, the pane sf-<id8> carries a newer
+// id), it retries once under the name plus a random suffix rather than
+// attach to a different conversation.
 func resumeCmd(ops sessionOps, cfg config.Config, s sessions.Session, w, h int) tea.Cmd {
-	return newSessionCmd(ops, tmux.SessionName(s.ID), s.Dir, s.ID, claudeArgv(cfg, "--resume", s.ID), w, h)
+	name, argv := tmux.SessionName(s.ID), claudeArgv(cfg, "--resume", s.ID)
+	return func() tea.Msg {
+		err := ops.NewSession(name, s.Dir, s.ID, argv, w, h)
+		if err != nil && strings.Contains(err.Error(), "duplicate session") {
+			alt := name + "-" + randomHex(2)
+			if err = ops.NewSession(alt, s.Dir, s.ID, argv, w, h); err == nil {
+				return startedMsg{name: alt, guard: name}
+			}
+		}
+		if err != nil {
+			return startFailedMsg{name: name, err: err}
+		}
+		return startedMsg{name: name, guard: name}
+	}
+}
+
+// randomHex returns n random bytes as hex.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf("%x", b)
 }
 
 // startCmd starts a new Claude session with a fresh id in dir.
@@ -105,8 +127,12 @@ func (m *homeModel) setStatus(kind int, text string) tea.Cmd {
 	return m.status.set(m.tickID, kind, text)
 }
 
-// refreshCmd starts a discovery now.
+// refreshCmd starts a discovery now, unless one is already in flight (its
+// result will serve).
 func (m *homeModel) refreshCmd() tea.Cmd {
+	if m.inFlight {
+		return nil
+	}
 	m.inFlight = true
 	return discoverCmd(m.deps.Disc, m.tickID)
 }

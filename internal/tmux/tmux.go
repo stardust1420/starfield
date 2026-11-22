@@ -61,6 +61,13 @@ func SessionName(claudeID string) string {
 	return "sf-" + claudeID
 }
 
+// sessionTarget matches the session named exactly name (no prefix or
+// pattern match); paneTarget is its current pane. set-option takes a pane
+// target in tmux 3.x ("=name" alone is refused there), and with no -w/-p it
+// still sets the session option.
+func sessionTarget(name string) string { return "=" + name }
+func paneTarget(name string) string    { return "=" + name + ":" }
+
 func (c *Client) base() []string {
 	return []string{"-L", c.Socket, "-f", c.ConfPath}
 }
@@ -143,8 +150,8 @@ func (c *Client) NewSession(name, dir, claudeID string, argv []string, width, he
 		return fmt.Errorf("new-session: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	for _, kv := range [][2]string{{"@sf_session", claudeID}, {"@sf_dir", dir}} {
-		if out, err := c.do("set-option", "-t", name, kv[0], kv[1]); err != nil {
-			_, _ = c.do("kill-session", "-t", name)
+		if out, err := c.do("set-option", "-t", paneTarget(name), kv[0], kv[1]); err != nil {
+			_, _ = c.do("kill-session", "-t", sessionTarget(name))
 			return fmt.Errorf("set-option %s: %w: %s", kv[0], err, strings.TrimSpace(string(out)))
 		}
 	}
@@ -154,7 +161,7 @@ func (c *Client) NewSession(name, dir, claudeID string, argv []string, width, he
 // AttachCmd returns the command that attaches to the session. TMUX is removed
 // from the environment so it works when starfield itself runs inside tmux.
 func (c *Client) AttachCmd(name string) *exec.Cmd {
-	cmd := exec.Command(c.Bin, append(c.base(), "attach-session", "-t", name)...)
+	cmd := exec.Command(c.Bin, append(c.base(), "attach-session", "-t", sessionTarget(name))...)
 	env := make([]string, 0, len(os.Environ()))
 	for _, e := range os.Environ() {
 		if !strings.HasPrefix(e, "TMUX=") {
@@ -167,7 +174,7 @@ func (c *Client) AttachCmd(name string) *exec.Cmd {
 
 // Kill ends the session.
 func (c *Client) Kill(name string) error {
-	if out, err := c.do("kill-session", "-t", name); err != nil {
+	if out, err := c.do("kill-session", "-t", sessionTarget(name)); err != nil {
 		return fmt.Errorf("kill-session: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
@@ -175,7 +182,7 @@ func (c *Client) Kill(name string) error {
 
 // Capture returns the last lines of the session's pane, with escapes.
 func (c *Client) Capture(name string, lines int) (string, error) {
-	out, err := c.do("capture-pane", "-p", "-e", "-t", name, "-S", "-"+strconv.Itoa(lines))
+	out, err := c.do("capture-pane", "-p", "-e", "-t", paneTarget(name), "-S", "-"+strconv.Itoa(lines))
 	if err != nil {
 		return "", err
 	}

@@ -255,6 +255,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case startedMsg:
 		delete(m.starting, msg.name)
+		delete(m.starting, msg.guard)
 		return m, attachCmd(m.ops, msg.name)
 
 	case startFailedMsg:

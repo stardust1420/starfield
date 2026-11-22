@@ -224,6 +224,17 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	case startedMsg:
+		// A session the home screen was starting is ready: go back so the
+		// attach happens.
+		h := m.back.resume(m.width, m.height)
+		next, cmd := h.Update(msg)
+		return next, tea.Batch(next.(homeModel).Init(), cmd)
+	case startFailedMsg, attachDoneMsg, actionMsg, clearStatusMsg:
+		// Results of the home screen's own commands: keep its state current.
+		next, cmd := m.back.Update(msg)
+		m.back = next.(homeModel)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -371,7 +382,7 @@ func (m pickerModel) renderRow(r pickerRow, sel bool, width int) string {
 // coral, grouping runs so a row isn't one escape sequence per character.
 func highlight(s string, pos []int, base lipgloss.Style) string {
 	if len(pos) == 0 {
-		return base.Render(s)
+		return base.Render(sessions.Sanitize(s))
 	}
 	hit := make(map[int]bool, len(pos))
 	for _, p := range pos {
@@ -384,6 +395,8 @@ func highlight(s string, pos []int, base lipgloss.Style) string {
 		if run == "" {
 			return
 		}
+		// Paths are untrusted text: no escapes or control bytes on screen.
+		run = sessions.Sanitize(run)
 		if runHit {
 			b.WriteString(match.Render(run))
 		} else {

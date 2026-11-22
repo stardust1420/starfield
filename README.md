@@ -66,7 +66,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 | `STARFIELD_ROOTS` | `~/Developer` | colon-separated directories scanned for repos (depth 2) in the picker |
 | `STARFIELD_HISTORY_DAYS` | `14` | how many days of stopped sessions to list |
 | `STARFIELD_DETACH_KEY` | `C-]` | key that returns to the home screen; a plain tmux key name such as `C-]` or `C-q`. A changed key takes effect once the private tmux server restarts: when no starfield sessions are running, or after `tmux -L starfield kill-server` |
-| `STARFIELD_CLAUDE_CMD` | `caffeinate -is claude` | command that launches Claude, split on whitespace |
+| `STARFIELD_CLAUDE_CMD` | `caffeinate -is claude` on macOS, `claude` elsewhere | command that launches Claude, split on whitespace |
 | `STARFIELD_REDUCED_MOTION` | unset | `1` keeps the starfield and busy glyph still |
 
 ## FAQ

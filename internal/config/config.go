@@ -3,6 +3,7 @@ package config
 
 import (
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -20,13 +21,25 @@ type Config struct {
 
 const defaultHistoryDays = 14
 
+// goos is runtime.GOOS; tests replace it.
+var goos = runtime.GOOS
+
+// defaultClaudeCmd keeps the Mac awake while Claude runs (caffeinate is
+// macOS only); elsewhere it is plain claude.
+func defaultClaudeCmd() []string {
+	if goos == "darwin" {
+		return []string{"caffeinate", "-is", "claude"}
+	}
+	return []string{"claude"}
+}
+
 // Load builds a Config from getenv (os.Getenv in production) and the home
 // directory. Bad values fall back to the defaults.
 func Load(getenv func(string) string, home string) Config {
 	c := Config{
 		HistoryDays: defaultHistoryDays,
 		DetachKey:   "C-]",
-		ClaudeCmd:   []string{"caffeinate", "-is", "claude"},
+		ClaudeCmd:   defaultClaudeCmd(),
 		ClaudeDir:   filepath.Join(home, ".claude"),
 		StateDir:    filepath.Join(home, ".config", "starfield"),
 	}

@@ -11,6 +11,9 @@ func env(m map[string]string) func(string) string {
 
 func TestLoadDefaultsAndOverrides(t *testing.T) {
 	home := "/home/u"
+	old := goos
+	goos = "darwin" // the default command depends on the OS
+	t.Cleanup(func() { goos = old })
 
 	c := Load(env(nil), home)
 	if want := []string{home + "/Developer"}; !reflect.DeepEqual(c.Roots, want) {
@@ -51,5 +54,19 @@ func TestLoadDefaultsAndOverrides(t *testing.T) {
 	if c.HistoryDays != 3 || c.DetachKey != "C-b" || !c.ReducedMotion ||
 		!reflect.DeepEqual(c.ClaudeCmd, []string{"claude", "--foo"}) {
 		t.Errorf("overrides not applied: %+v", c)
+	}
+}
+
+func TestDefaultClaudeCmdPerOS(t *testing.T) {
+	old := goos
+	t.Cleanup(func() { goos = old })
+	for os, want := range map[string][]string{
+		"darwin": {"caffeinate", "-is", "claude"},
+		"linux":  {"claude"},
+	} {
+		goos = os
+		if got := Load(env(nil), "/home/u").ClaudeCmd; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: ClaudeCmd = %v; want %v", os, got, want)
+		}
 	}
 }

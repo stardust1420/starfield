@@ -1,6 +1,8 @@
 package src
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -207,5 +209,60 @@ func TestHomeNOpensPicker(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Errorf("n should start the scan")
+	}
+}
+
+// A start the home screen launched can finish while the picker is open (the
+// picker was reopened before startedMsg arrived): it must still attach.
+func TestPickerForwardsStartedMsgToHome(t *testing.T) {
+	p := testPicker(t, &fakeOps{}, dirs.Candidate{Path: "/w/alpha", Source: dirs.Recent})
+	p.back.markStarting("sf-12345678")
+	next, cmd := p.Update(startedMsg{name: "sf-12345678", guard: "sf-12345678"})
+	home, ok := next.(homeModel)
+	if !ok {
+		t.Fatalf("startedMsg returned %T; want homeModel", next)
+	}
+	if len(home.starting) != 0 {
+		t.Errorf("starting = %v; want cleared", home.starting)
+	}
+	attached := false
+	for _, msg := range runAll(cmd) {
+		if strings.Contains(fmt.Sprintf("%T", msg), "execMsg") {
+			attached = true
+		}
+	}
+	if !attached {
+		t.Error("no attach command returned")
+	}
+}
+
+func TestPickerForwardsResultsToBack(t *testing.T) {
+	p := testPicker(t, &fakeOps{}, dirs.Candidate{Path: "/w/alpha", Source: dirs.Recent})
+	p.back.markStarting("sf-12345678")
+	next, _ := p.Update(startFailedMsg{name: "sf-12345678", err: errors.New("boom")})
+	p, ok := next.(pickerModel)
+	if !ok {
+		t.Fatalf("startFailedMsg left the picker (%T)", next)
+	}
+	if len(p.back.starting) != 0 {
+		t.Errorf("guard not cleared: %v", p.back.starting)
+	}
+	if p.back.status.text != "boom" {
+		t.Errorf("back status = %q; want boom", p.back.status.text)
+	}
+	next, _ = p.Update(actionMsg{done: "stopped x"})
+	if p = next.(pickerModel); p.back.status.text != "stopped x" {
+		t.Errorf("actionMsg not forwarded: status %q", p.back.status.text)
+	}
+}
+
+func TestPickerRowStripsControlSequences(t *testing.T) {
+	p := testPicker(t, &fakeOps{}, dirs.Candidate{Path: "/w/ev\x1b[2Jil\x07", Source: dirs.Scanned})
+	row := p.renderRow(p.rows[0], true, 60)
+	if strings.Contains(row, "\x1b[2J") || strings.Contains(row, "\x07") {
+		t.Errorf("row keeps control sequences: %q", row)
+	}
+	if !strings.Contains(plain(row), "/w/evil") {
+		t.Errorf("row = %q", plain(row))
 	}
 }
