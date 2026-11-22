@@ -94,45 +94,69 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	}
 }
 
-// homeKeyMap is the help of the home screen. Its short help is compact so
-// a status message still fits beside it at 80 columns. Tasks that add
-// session actions (enter, x) append their bindings to actions.
+// homeKeyMap is the help of the home screen, in one of its two views:
+// projects (inProject false) or one project's sessions. Its short help is
+// compact so a status message still fits beside it at 80 columns.
 type homeKeyMap struct {
 	keyMap
+	inProject   bool
 	Move        key.Binding // short form of keyMap.Up
 	HelpShort   key.Binding // short form of keyMap.Help
+	Enter       key.Binding // open a project / attach a session
+	New         key.Binding
+	Back        key.Binding
+	Stop        key.Binding
+	Preview     key.Binding
 	RunningOnly key.Binding
 	History     key.Binding
-	New         key.Binding
-	Preview     key.Binding
-	actions     []key.Binding
 }
 
-var homeKeys = homeKeyMap{
-	keyMap:      keys,
-	Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
-	HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-	RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
-	History:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "history window")),
-	New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
-	Preview:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "preview")),
-	actions: []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
-		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
-	},
+func newHomeKeys(inProject bool) homeKeyMap {
+	k := homeKeyMap{
+		keyMap:      keys,
+		inProject:   inProject,
+		Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
+		HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Enter:       key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
+		New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new project")),
+		Back:        key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "projects")),
+		Stop:        key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
+		Preview:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "preview")),
+		RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+		History:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "history window")),
+	}
+	if inProject {
+		k.Enter.SetHelp("enter", "attach")
+		k.New.SetHelp("n", "new session")
+	}
+	return k
 }
+
+var (
+	projectKeys = newHomeKeys(false)
+	sessionKeys = newHomeKeys(true)
+)
 
 func (k homeKeyMap) ShortHelp() []key.Binding {
-	// Only the primary actions (attach, new); the rest are in the full
-	// help, so a status message has room beside the keys.
-	short := append([]key.Binding{}, k.actions[0], k.New)
-	return append(short, k.RunningOnly, filterKey, k.HelpShort, quitKey)
+	// The primary actions only; the rest are in the full help, so a status
+	// message has room beside the keys.
+	if k.inProject {
+		return []key.Binding{k.Enter, k.New, k.Back, filterKey, k.HelpShort, quitKey}
+	}
+	return []key.Binding{k.Enter, k.New, k.RunningOnly, filterKey, k.HelpShort, quitKey}
 }
 
 func (k homeKeyMap) FullHelp() [][]key.Binding {
+	if k.inProject {
+		return [][]key.Binding{
+			{k.Up, k.Down},
+			{k.Enter, k.New, k.Stop, k.Preview, k.RunningOnly, k.History},
+			{filterKey, k.Back, k.Help, quitKey},
+		}
+	}
 	return [][]key.Binding{
 		{k.Up, k.Down},
-		append(append([]key.Binding{k.actions[0], k.New}, k.actions[1:]...), k.Preview, k.RunningOnly, k.History),
+		{k.Enter, k.New, k.RunningOnly, k.History},
 		{filterKey, k.Help, quitKey},
 	}
 }

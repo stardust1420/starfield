@@ -12,9 +12,8 @@ import (
 	"github.com/stardust1420/starfield/internal/sessions"
 )
 
-// Session cards on the home screen: one heading per directory, then a card
-// per session in that directory. Body lines, each left out when it doesn't
-// apply:
+// Session cards, on a project's view: one card per session. Body lines,
+// each left out when it doesn't apply:
 //
 //	⎇ main · opus-5-5
 //	"<last prompt>"
@@ -22,10 +21,9 @@ import (
 //	● idle · up 2h        (or ◐ working, ◔ starting…, ◌ external, ○ 3h ago)
 
 var (
-	promptStyle  = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
-	valueStyle   = lipgloss.NewStyle().Foreground(colorText)
-	headingGlyph = statusAccentStyle.Render("▸")
-	dotSep       = mutedStyle.Render(" · ")
+	promptStyle = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
+	valueStyle  = lipgloss.NewStyle().Foreground(colorText)
+	dotSep      = mutedStyle.Render(" · ")
 )
 
 // busyFrames is the pulse of a working session's glyph, one step every few
@@ -34,41 +32,20 @@ var busyFrames = []string{"◐", "◓", "◑", "◒"}
 
 func busyGlyph(frame int) string { return busyFrames[(frame/3)%len(busyFrames)] }
 
-// sessionEntries builds the grid for ss (already in display order) and the
-// sessions parallel to it, nil for headings. Directories keep the order of
-// their first session.
+// sessionEntries builds the grid for ss (one project's sessions, already in
+// display order) and the sessions parallel to it.
 func sessionEntries(ss []sessions.Session, now time.Time, home string) ([]gridEntry, []*sessions.Session) {
 	return buildSessionEntries(ss, now, home, glyphBusy)
 }
 
 // buildSessionEntries is sessionEntries with the busy glyph to draw, so the
-// home screen can pulse it.
+// screen can pulse it.
 func buildSessionEntries(ss []sessions.Session, now time.Time, home, busy string) ([]gridEntry, []*sessions.Session) {
-	var order []string
-	groups := map[string][]int{}
-	for i, s := range ss {
-		if _, ok := groups[s.Dir]; !ok {
-			order = append(order, s.Dir)
-		}
-		groups[s.Dir] = append(groups[s.Dir], i)
-	}
-
-	entries := make([]gridEntry, 0, len(ss)+len(order))
-	items := make([]*sessions.Session, 0, cap(entries))
-	for _, dir := range order {
-		running := 0
-		for _, i := range groups[dir] {
-			if isManagedLive(ss[i].State) {
-				running++
-			}
-		}
-		entries = append(entries, dirHeading(dir, home, running))
-		items = append(items, nil)
-		for _, i := range groups[dir] {
-			s := &ss[i]
-			entries = append(entries, sessionCard(*s, now, home, busy))
-			items = append(items, s)
-		}
+	entries := make([]gridEntry, len(ss))
+	items := make([]*sessions.Session, len(ss))
+	for i := range ss {
+		entries[i] = sessionCard(ss[i], now, home, busy)
+		items[i] = &ss[i]
 	}
 	return entries, items
 }
@@ -77,19 +54,6 @@ func buildSessionEntries(ss []sessions.Session, now time.Time, home, busy string
 // count as "running" in headings and the header.
 func isManagedLive(st sessions.State) bool {
 	return st == sessions.Running || st == sessions.Starting
-}
-
-func dirHeading(dir, home string, running int) gridEntry {
-	// Dir is kept raw for tmux; sanitize it only for display.
-	name := sessions.Sanitize(filepath.Base(dir))
-	if dir == "" {
-		name = "(unknown directory)"
-	}
-	meta := mutedStyle.Render(sessions.Sanitize(tildePath(dir, home)))
-	if running > 0 {
-		meta += dotSep + runningStyle.Render(strconv.Itoa(running)+" running")
-	}
-	return gridEntry{key: "dir:" + dir, heading: true, glyph: headingGlyph, title: name, meta: meta}
 }
 
 // sessionCard is one session's card. busy is the glyph for a working

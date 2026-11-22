@@ -47,14 +47,17 @@ func (f *fakeOps) Capture(name string, lines int) (string, error) {
 }
 func (f *fakeOps) Kill(name string) error { f.killed = append(f.killed, name); return nil }
 
-// homeWith builds a home screen showing ss with the cursor on the first
-// session and fake ops.
+// homeWith builds a home screen showing ss, opened on the first session's
+// project with the cursor on that session, and fake ops.
 func homeWith(t *testing.T, ops sessionOps, ss ...sessions.Session) homeModel {
 	t.Helper()
 	m := InitHomeModel(Deps{Cfg: testCfg()}, 100, 30)
 	m.ops = ops
 	next, _ := m.Update(discoveredMsg{id: m.tickID, sessions: ss})
 	m = next.(homeModel)
+	if len(ss) > 0 {
+		m = m.openProject(ss[0].Dir)
+	}
 	if m.selected() == nil {
 		t.Fatalf("no session selected")
 	}

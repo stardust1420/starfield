@@ -168,6 +168,18 @@ func (g *gridView) setEntries(entries []gridEntry) {
 	g.scroll()
 }
 
+// selectKey moves the cursor to the selectable entry with key, if there
+// is one.
+func (g *gridView) selectKey(key string) {
+	for i, e := range g.entries {
+		if e.key == key && e.selectable {
+			g.cursor = i
+			g.scroll()
+			return
+		}
+	}
+}
+
 // nearestSelectable is i if selectable, else the next selectable entry
 // after it, else the one before it, else -1.
 func (g gridView) nearestSelectable(i int) int {

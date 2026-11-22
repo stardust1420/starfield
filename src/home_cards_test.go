@@ -13,49 +13,22 @@ var cardNow = time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
 
 func plain(s string) string { return sgr.ReplaceAllString(s, "") }
 
-func TestSessionEntriesGroupsByDirWithHeadings(t *testing.T) {
+func TestSessionEntriesOneCardPerSession(t *testing.T) {
 	ss := []sessions.Session{
 		{ID: "a", Dir: "/home/me/Developer/starfield", Title: "A", State: sessions.Running},
-		{ID: "b", Dir: "/home/me/Developer/stardocker", Title: "B", State: sessions.External},
 		{ID: "c", Dir: "/home/me/Developer/starfield", Title: "C", State: sessions.Stopped},
 	}
 	entries, items := sessionEntries(ss, cardNow, "/home/me")
-
-	wantHeading := []bool{true, false, false, true, false}
-	wantItem := []string{"", "a", "c", "", "b"}
-	if len(entries) != len(wantHeading) || len(items) != len(entries) {
-		t.Fatalf("got %d entries, %d items; want %d of each", len(entries), len(items), len(wantHeading))
+	if len(entries) != 2 || len(items) != 2 {
+		t.Fatalf("got %d entries, %d items; want 2 of each", len(entries), len(items))
 	}
 	for i, e := range entries {
-		if e.heading != wantHeading[i] {
-			t.Fatalf("entry %d heading = %v; want %v", i, e.heading, wantHeading[i])
+		if e.heading || !e.selectable {
+			t.Errorf("entry %d = %+v; want a selectable card", i, e)
 		}
-		if e.heading {
-			if e.selectable {
-				t.Errorf("heading %d is selectable", i)
-			}
-			if items[i] != nil {
-				t.Errorf("items[%d] = %v; want nil for a heading", i, items[i])
-			}
-			continue
+		if items[i].ID != ss[i].ID {
+			t.Errorf("items[%d] = %s; want %s", i, items[i].ID, ss[i].ID)
 		}
-		if !e.selectable {
-			t.Errorf("card %d is not selectable", i)
-		}
-		if items[i] == nil || items[i].ID != wantItem[i] {
-			t.Fatalf("items[%d] = %v; want session %q", i, items[i], wantItem[i])
-		}
-	}
-
-	if got := entries[0].title; got != "starfield" {
-		t.Errorf("first heading title = %q; want starfield", got)
-	}
-	meta := plain(entries[0].meta)
-	if !strings.Contains(meta, "~/Developer/starfield") || !strings.Contains(meta, "1 running") {
-		t.Errorf("first heading meta = %q; want the ~ path and 1 running", meta)
-	}
-	if meta := plain(entries[3].meta); strings.Contains(meta, "running") {
-		t.Errorf("second heading meta = %q; external sessions are not counted as running", meta)
 	}
 }
 
@@ -218,6 +191,7 @@ func TestDiscoveryErrorKeepsPreviousSessions(t *testing.T) {
 		m = next.(homeModel)
 	}
 	update(discoveredMsg{id: m.tickID, sessions: ss})
+	m = m.openProject("/x")
 	update(discoveredMsg{id: m.tickID, err: errors.New("tmux broke")})
 
 	if len(m.all) != 1 || m.emptyPage() || m.selected() == nil || m.selected().ID != "a" {
@@ -236,11 +210,11 @@ func TestDiscoveryErrorKeepsPreviousSessions(t *testing.T) {
 	}
 }
 
-func TestDirHeadingStripsControlSequences(t *testing.T) {
-	e := dirHeading("/w/ev\x1b[2Jil\x07", "/home/me", 0)
-	for _, s := range []string{e.title, e.meta} {
-		if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x07") {
-			t.Errorf("heading keeps control sequences: %q", s)
+func TestProjectCardStripsControlSequences(t *testing.T) {
+	e := projectCard(project{Dir: "/w/ev\x1b[2Jil\x07", Branch: "ma\x1b]52;c;eA==\x07in"}, cardNow, "/home/me")
+	for _, s := range append([]string{e.title}, e.body...) {
+		if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x07") || strings.Contains(s, "]52;") {
+			t.Errorf("card keeps control sequences: %q", s)
 		}
 	}
 	if e.title != "evil" {

@@ -56,10 +56,13 @@ func discoverCmd(d *sessions.Discoverer, id int, fromTick bool, days int) tea.Cm
 	}
 }
 
-// homeModel is the home screen: every Claude session as a card, grouped by
-// directory. It refreshes on a tick loop (one discovery in flight at a
-// time) and runs a frame loop for the busy pulse and, while there's nothing
-// to list, the starfield.
+// homeModel is the home screen. It opens on projects, one card per
+// directory with sessions under the STARFIELD banner; enter on a project
+// shows that directory's sessions, and esc goes back. Both views share one
+// model so the refresh loop, attach and preview don't care which is shown.
+// It refreshes on a tick loop (one discovery in flight at a time) and runs
+// a frame loop for the busy pulse and, while there's nothing to list, the
+// starfield.
 type homeModel struct {
 	deps          Deps
 	ops           sessionOps      // nil when tmux is unavailable
@@ -71,8 +74,15 @@ type homeModel struct {
 
 	grid  gridView
 	all   []sessions.Session  // the latest discovery, in display order
-	shown []sessions.Session  // all after the a / filter
-	items []*sessions.Session // items[i] is what grid entry i shows (nil for a heading)
+	shown []sessions.Session  // the project's sessions after the window, a and the filter
+	items []*sessions.Session // items[i] is what grid entry i shows (sessions view)
+
+	// project is the directory whose sessions are shown; "" is the
+	// projects view. projItems parallels the grid there.
+	project    string
+	projItems  []*project
+	projFilter filterBar // the projects view's filter, kept while a project is open
+	projKey    string    // the card to select again on the way back
 
 	loaded   bool // the first discovery has returned
 	inFlight bool // a discovery is running
@@ -99,7 +109,7 @@ func InitHomeModel(d Deps, width, height int) homeModel {
 	m := homeModel{
 		deps:   d,
 		help:   newHelp(),
-		keys:   homeKeys,
+		keys:   projectKeys,
 		width:  width,
 		height: height,
 		home:   home,
@@ -154,28 +164,76 @@ func (m homeModel) resume(width, height int) homeModel {
 	return m
 }
 
-// selected returns the session under the cursor, or nil.
+// selected returns the session under the cursor, or nil (always nil on the
+// projects view).
 func (m homeModel) selected() *sessions.Session {
-	if m.grid.cursor < 0 || m.grid.cursor >= len(m.items) {
+	if m.project == "" || m.grid.cursor < 0 || m.grid.cursor >= len(m.items) {
 		return nil
 	}
 	return m.items[m.grid.cursor]
 }
 
-// rebuild fills the grid from the last discovery with the current view and
-// filter. The grid keeps the cursor on the same session across rebuilds.
-func (m *homeModel) rebuild() {
-	m.shown = filterSessions(withinWindow(m.all, m.historyDays, time.Now()), m.runningOnly, m.filter.query())
-	m.hasBusy = false
-	for _, s := range m.shown {
-		if s.State == sessions.Running && s.Status == "busy" {
-			m.hasBusy = true
-		}
+// selectedProject returns the project under the cursor on the projects
+// view, or nil.
+func (m homeModel) selectedProject() *project {
+	if m.project != "" || m.grid.cursor < 0 || m.grid.cursor >= len(m.projItems) {
+		return nil
 	}
-	entries, items := buildSessionEntries(m.shown, time.Now(), m.home, m.busyGlyph())
-	m.items = items
+	return m.projItems[m.grid.cursor]
+}
+
+// rebuild fills the grid from the last discovery for the current view,
+// history window, a and filter. The grid keeps the cursor on the same card
+// across rebuilds.
+func (m *homeModel) rebuild() {
+	now := time.Now()
+	windowed := withinWindow(m.all, m.historyDays, now)
+	m.hasBusy = false
+	var entries []gridEntry
+	if m.project == "" {
+		ps := filterProjects(groupProjects(windowed), m.runningOnly, m.filter.query())
+		entries, m.projItems = projectEntries(ps, now, m.home)
+		m.shown, m.items = nil, nil
+	} else {
+		m.shown = filterSessions(sessionsIn(windowed, m.project), m.runningOnly, m.filter.query())
+		for _, s := range m.shown {
+			if s.State == sessions.Running && s.Status == "busy" {
+				m.hasBusy = true
+			}
+		}
+		entries, m.items = buildSessionEntries(m.shown, now, m.home, m.busyGlyph())
+		m.projItems = nil
+	}
 	m.layout()
 	m.grid.setEntries(entries)
+}
+
+// openProject switches to dir's sessions, with a fresh filter. The projects
+// view's filter and selection are kept for esc.
+func (m homeModel) openProject(dir string) homeModel {
+	if m.project == "" {
+		m.projFilter = m.filter
+	}
+	m.projKey = "project:" + dir
+	m.project = dir
+	m.filter = newFilterBar()
+	m.keys = sessionKeys
+	m.grid.cursor, m.grid.offset = 0, 0
+	m.rebuild()
+	return m
+}
+
+// closeProject goes back to the projects view as it was left.
+func (m homeModel) closeProject() homeModel {
+	m.project = ""
+	m.filter = m.projFilter
+	m.keys = projectKeys
+	m.confirm = nil
+	m.previewOpen = false
+	m.previewName, m.previewContent, m.previewErr = "", "", ""
+	m.rebuild()
+	m.grid.selectKey(m.projKey)
+	return m
 }
 
 func (m homeModel) busyGlyph() string {
@@ -192,7 +250,16 @@ func (m *homeModel) layout() {
 	if m.previewOpen {
 		panel = previewLines
 	}
-	m.grid.resize(pageWidth(m.width), listGridHeightWith(m.height, lipgloss.Height(m.bottomLeft()), m.confirm != nil, panel))
+	m.grid.resize(pageWidth(m.width), listGridHeightWith(m.height-m.bannerLines(), lipgloss.Height(m.bottomLeft()), m.confirm != nil, panel))
+}
+
+// bannerLines is the height the banner takes: on the projects view, when
+// the window has room for it.
+func (m homeModel) bannerLines() int {
+	if m.project == "" && showBanner(m.width, m.height) {
+		return bannerHeight
+	}
+	return 0
 }
 
 // bottomLeft is the help, or the filter field while it is being edited.
@@ -204,8 +271,9 @@ func (m homeModel) bottomLeft() string {
 }
 
 // emptyPage reports whether the screen shows the starfield instead of the
-// grid: before the first discovery, and when there are no sessions at all.
-func (m homeModel) emptyPage() bool { return !m.loaded || len(m.all) == 0 }
+// grid: before the first discovery, and on the projects view when there are
+// no sessions at all.
+func (m homeModel) emptyPage() bool { return !m.loaded || (len(m.all) == 0 && m.project == "") }
 
 func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -352,16 +420,34 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.History):
 		return m.cycleHistory()
 	case msg.String() == "esc":
-		if m.filter.query() != "" {
+		switch {
+		case m.filter.query() != "":
 			m.filter.clear()
 			m.rebuild()
+		case m.project != "":
+			return m.closeProject(), m.previewCmd()
 		}
 	case msg.String() == "enter":
+		if m.project == "" {
+			if p := m.selectedProject(); p != nil {
+				return m.openProject(p.Dir), nil
+			}
+			return m, nil
+		}
 		return m.enterKey()
+	case key.Matches(msg, m.keys.New):
+		if m.project == "" {
+			return m.newKey()
+		}
+		return m.startIn(m.project)
+	case m.project == "":
+		// Session keys (x, p) mean nothing on the projects view; the
+		// rest move the grid.
+		if msg.String() != "x" && msg.String() != "p" {
+			m.grid.handleKey(msg)
+		}
 	case msg.String() == "x":
 		return m.stopKey()
-	case key.Matches(msg, m.keys.New):
-		return m.newKey()
 	case key.Matches(msg, m.keys.Preview):
 		m.previewOpen = !m.previewOpen
 		m.previewName, m.previewContent, m.previewErr = "", "", ""
@@ -384,16 +470,28 @@ func (m homeModel) View() string {
 	}
 
 	w := pageWidth(m.width)
-	counts := sessionCounts(withinWindow(m.all, m.historyDays, time.Now()), m.runningOnly) +
-		"  " + historyTag(m.historyDays)
-	header := renderHeader(w, counts, withFilterCrumb(m.filter)...)
+	scope := withinWindow(m.all, m.historyDays, time.Now())
+	var crumbs []string
+	if m.project != "" {
+		scope = sessionsIn(scope, m.project)
+		crumbs = []string{projectName(m.project)}
+	}
+	counts := sessionCounts(scope, m.runningOnly) + "  " + historyTag(m.historyDays)
+	header := renderHeader(w, counts, withFilterCrumb(m.filter, crumbs...)...)
+	if m.bannerLines() > 0 {
+		header = renderBanner(w) + header
+	}
 
 	var empty string
 	switch {
+	case m.filter.query() != "" && m.project == "":
+		empty = "No projects match " + m.filter.crumb()
 	case m.filter.query() != "":
 		empty = "No sessions match " + m.filter.crumb()
 	case m.runningOnly:
 		empty = "Nothing running · a to show all"
+	case m.project != "":
+		empty = "No sessions here " + historyPhrase(m.historyDays) + " · n to start one, t to look further back"
 	default: // every stopped session is older than the window
 		empty = "No sessions " + historyPhrase(m.historyDays) + " · t to look further back"
 	}

@@ -31,21 +31,37 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 
 ## Keybindings
 
-### Home
+Starfield opens on your **projects**: one card per directory that has Claude sessions, under the STARFIELD banner. `enter` opens a project to show its sessions; `esc` goes back.
+
+### Projects
 
 | Key | Action |
 | --- | --- |
 | `←↑↓→` / `hjkl` | move the selection |
 | `g` / `G`, `pgup` / `pgdn` | first, last, page |
 | `tab` / `shift+tab` | next / previous card |
+| `enter` | open the project's sessions |
+| `n` | new project (opens the directory picker) |
+| `a` | toggle all projects / only those with a running session |
+| `t` | history window for stopped sessions: 1d → 3d → 7d → 14d → 30d → 90d → all time (shown as `◷ 14d` in the header; remembered across launches) |
+| `/` | filter projects by name or path |
+| `esc` | clear the filter |
+| `?` | toggle the full help |
+| `q` / `ctrl+c` | quit (sessions keep running) |
+
+### Sessions (inside a project)
+
+| Key | Action |
+| --- | --- |
+| `←↑↓→` / `hjkl`, `g` / `G`, `pgup` / `pgdn`, `tab` | move, as on projects |
 | `enter` | attach to a running session, or resume a stopped one |
-| `n` | new session (opens the directory picker) |
+| `n` | new session in this project |
 | `x` | stop the selected managed session (asks first) |
 | `p` | toggle the live preview panel (pane contents, or last prompt for stopped/external sessions) |
 | `a` | toggle all sessions / running only |
-| `t` | history window for stopped sessions: 1d → 3d → 7d → 14d → 30d → 90d → all time (shown as `◷ 14d` in the header; remembered across launches) |
-| `/` | filter |
-| `esc` | clear the filter |
+| `t` | history window, as on projects (one setting for both) |
+| `/` | filter sessions by title, branch or last prompt |
+| `esc` | clear the filter, then back to projects |
 | `?` | toggle the full help |
 | `q` / `ctrl+c` | quit (sessions keep running) |
 
@@ -57,7 +73,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 | `↑` / `↓` (`ctrl+p` / `ctrl+n`) | select |
 | `pgup` / `pgdn` | page |
 | `tab` | complete the query to the selected path |
-| `enter` | start Claude there and attach |
+| `enter` | start Claude there and attach (detaching returns to that project's sessions) |
 | `esc` | back |
 
 ## Environment variables

@@ -336,7 +336,8 @@ func (m pickerModel) start() (tea.Model, tea.Cmd) {
 		m.err = "✗ not a directory: " + r.disp
 		return m, nil
 	}
-	h := m.back.resume(m.width, m.height)
+	// Land on the new session's project, so detaching comes back to it.
+	h := m.back.resume(m.width, m.height).openProject(r.cand.Path)
 	var cmd tea.Cmd
 	if r.create {
 		h, cmd = h.createIn(r.cand.Path)

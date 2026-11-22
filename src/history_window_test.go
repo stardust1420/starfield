@@ -93,20 +93,24 @@ func TestNarrowingTheWindowHidesOlderStoppedAtOnce(t *testing.T) {
 		{ID: "old", Dir: "/b", State: sessions.Stopped, LastActive: now.Add(-10 * 24 * time.Hour)},
 	}})
 	m = next.(homeModel)
-	if len(m.shown) != 3 {
-		t.Fatalf("all time shows %d; want 3", len(m.shown))
+	if len(m.projItems) != 2 {
+		t.Fatalf("all time shows %d projects; want 2", len(m.projItems))
 	}
 	next, _ = m.Update(tKey()) // all time → 1 day
 	m = next.(homeModel)
+	if len(m.projItems) != 1 || m.projItems[0].Dir != "/a" {
+		t.Errorf("1 day shows projects %v; want only /a (b's only session is old)", m.projItems)
+	}
+	if !strings.Contains(m.status.text, "1 day") {
+		t.Errorf("status = %q; want it to name the new window", m.status.text)
+	}
+	m = m.openProject("/a")
 	var ids []string
 	for _, s := range m.shown {
 		ids = append(ids, s.ID)
 	}
 	if strings.Join(ids, ",") != "run,new" {
 		t.Errorf("1 day shows %v; want [run new] (running sessions ignore the window)", ids)
-	}
-	if !strings.Contains(m.status.text, "1 day") {
-		t.Errorf("status = %q; want it to name the new window", m.status.text)
 	}
 }
 
