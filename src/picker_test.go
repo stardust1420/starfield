@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/stardust1420/starfield/internal/dirs"
 )
@@ -389,5 +390,22 @@ func TestPickerRowStripsControlSequences(t *testing.T) {
 	}
 	if !strings.Contains(plain(row), "/w/evil") {
 		t.Errorf("row = %q", plain(row))
+	}
+}
+
+func TestPickerLongQueryStaysOnOneLine(t *testing.T) {
+	long := "/var/folders/fd/jbqyk_0d5k5g7dw7jzlqq6z80000gn/T/TestPickerSomethingLong2182259913/001/brand/new-project"
+	p := typeInto(t, testPicker(t, &fakeOps{}), long)
+	v := plain(p.View())
+	if !strings.Contains(v, "new-project▏") {
+		t.Errorf("prompt should end with the end of the query:\n%s", v)
+	}
+	if !strings.Contains(v, "will be created") {
+		t.Errorf("a long query pushed the rows out of the panel:\n%s", v)
+	}
+	for _, line := range strings.Split(v, "\n") {
+		if w := lipgloss.Width(line); w > 100 {
+			t.Errorf("line wider than the window (%d): %q", w, line)
+		}
 	}
 }

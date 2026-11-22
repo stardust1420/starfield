@@ -11,6 +11,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/stardust1420/starfield/internal/claude"
 	"github.com/stardust1420/starfield/internal/dirs"
@@ -354,9 +355,15 @@ func (m pickerModel) View() string {
 	w := m.panelWidth()
 	inner := w - 4 // border and padding
 
-	// Prompt: ❯ query▏ with the match count on the right.
-	prompt := brandStyle.Render("❯ ") + crumbStyle.Render(m.field.value) + statusAccentStyle.Render("▏")
+	// Prompt: ❯ query▏ with the match count on the right. A query too long
+	// for the line shows its end (where the cursor is), not a wrapped line.
 	count := mutedStyle.Render(fmt.Sprintf("%d/%d", len(m.rows), len(m.cands)))
+	room := max(1, inner-lipgloss.Width(count)-1-lipgloss.Width("❯ ▏"))
+	query := m.field.value
+	if lipgloss.Width(query) > room {
+		query = "…" + ansi.TruncateLeft(query, lipgloss.Width(query)-room+1, "")
+	}
+	prompt := brandStyle.Render("❯ ") + crumbStyle.Render(query) + statusAccentStyle.Render("▏")
 	gap := max(1, inner-lipgloss.Width(prompt)-lipgloss.Width(count))
 	lines := []string{prompt + strings.Repeat(" ", gap) + count, borderStyle.Render(strings.Repeat("─", inner))}
 
