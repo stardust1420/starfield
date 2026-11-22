@@ -105,3 +105,22 @@ func TestExpandTilde(t *testing.T) {
 		}
 	}
 }
+
+func TestRecentsDoesNotCheckTheDisk(t *testing.T) {
+	now := time.Now()
+	got := Recents([]claude.HistorySession{
+		{Dir: "/gone/old", LastActive: now.Add(-time.Hour)},
+		{Dir: "/gone/new", LastActive: now},
+		{Dir: ""},
+	})
+	var paths []string
+	for _, c := range got {
+		paths = append(paths, c.Path)
+		if c.Source != Recent {
+			t.Errorf("%s source = %v; want Recent", c.Path, c.Source)
+		}
+	}
+	if !reflect.DeepEqual(paths, []string{"/gone/new", "/gone/old"}) {
+		t.Errorf("Recents = %v; want both, newest first, unchecked", paths)
+	}
+}

@@ -3,6 +3,7 @@ package config
 
 import (
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -55,10 +56,10 @@ func Load(getenv func(string) string, home string) Config {
 		c.Roots = []string{filepath.Join(home, "Developer")}
 	}
 
-	if n, err := strconv.Atoi(strings.TrimSpace(getenv("STARFIELD_HISTORY_DAYS"))); err == nil && n > 0 {
-		c.HistoryDays = n
+	if n, err := strconv.Atoi(strings.TrimSpace(getenv("STARFIELD_HISTORY_DAYS"))); err == nil && n >= 0 {
+		c.HistoryDays = n // 0 is all time
 	}
-	if v := strings.TrimSpace(getenv("STARFIELD_DETACH_KEY")); v != "" {
+	if v := strings.TrimSpace(getenv("STARFIELD_DETACH_KEY")); validKey(v) {
 		c.DetachKey = v
 	}
 	if f := strings.Fields(getenv("STARFIELD_CLAUDE_CMD")); len(f) > 0 {
@@ -68,6 +69,18 @@ func Load(getenv func(string) string, home string) Config {
 		c.ReducedMotion = true
 	}
 	return c
+}
+
+// keyPattern is a tmux key: modifiers (C-, M-, S-), then one printable
+// character or a key name such as F5, Enter or PageUp.
+var keyPattern = regexp.MustCompile(`^([CMS]-)*([!-~]|[A-Za-z][A-Za-z0-9]+)$`)
+
+// validKey reports whether k can go into the generated tmux.conf as the
+// detach key. Characters that end a tmux command or break the status-line
+// format it is shown in (, ; # " ' \ { } $) are refused, so a typo can't
+// leave a session with no way back.
+func validKey(k string) bool {
+	return keyPattern.MatchString(k) && !strings.ContainsAny(k, ",;#\"'\\{}$")
 }
 
 func expandHome(p, home string) string {

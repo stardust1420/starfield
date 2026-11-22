@@ -1,6 +1,9 @@
 package procs
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParsePS(t *testing.T) {
 	out := "  1     0 Sun Nov 22 11:28:31 2026 /sbin/launchd\n" +
@@ -78,5 +81,18 @@ func TestIsClaude(t *testing.T) {
 		if got := tb.IsClaude(pid); got != want {
 			t.Errorf("pid %d: got %v want %v", pid, got, want)
 		}
+	}
+}
+
+func TestPSRunsInTheCLocale(t *testing.T) {
+	cmd := psCommand()
+	last := ""
+	for _, e := range cmd.Env {
+		if strings.HasPrefix(e, "LC_ALL=") {
+			last = e
+		}
+	}
+	if last != "LC_ALL=C" {
+		t.Errorf("ps env sets %q; want LC_ALL=C last, so lstart is in English", last)
 	}
 }

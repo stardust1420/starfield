@@ -66,6 +66,17 @@ func scan(dir string, level, depth int, out *[]string) {
 // Candidates returns recent session directories (newest first), then scanned
 // ones not already listed. Only existing directories are included.
 func Candidates(hist []claude.HistorySession, roots []string, depth int) []Candidate {
+	return candidates(hist, roots, depth, isDir)
+}
+
+// Recents is the recent part of Candidates without checking each directory
+// still exists, so it never touches the disk: a list to show at once while
+// Candidates runs.
+func Recents(hist []claude.HistorySession) []Candidate {
+	return candidates(hist, nil, 0, func(string) bool { return true })
+}
+
+func candidates(hist []claude.HistorySession, roots []string, depth int, exists func(string) bool) []Candidate {
 	latest := map[string]time.Time{}
 	for _, h := range hist {
 		if h.Dir == "" {
@@ -78,7 +89,7 @@ func Candidates(hist []claude.HistorySession, roots []string, depth int) []Candi
 	}
 	recent := make([]Candidate, 0, len(latest))
 	for d, t := range latest {
-		if isDir(d) {
+		if exists(d) {
 			recent = append(recent, Candidate{Path: d, Source: Recent, LastUsed: t})
 		}
 	}

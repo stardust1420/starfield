@@ -79,7 +79,7 @@ func filterProjects(ps []project, runningOnly bool, query string) []project {
 		if runningOnly && p.Running+p.External == 0 {
 			continue
 		}
-		if !matches(query, filepath.Base(p.Dir), p.Dir) {
+		if !matches(query, projectName(p.Dir), p.Dir) {
 			continue
 		}
 		out = append(out, p)
@@ -87,11 +87,24 @@ func filterProjects(ps []project, runningOnly bool, query string) []project {
 	return out
 }
 
-// sessionsIn keeps the sessions of one directory.
-func sessionsIn(ss []sessions.Session, dir string) []sessions.Session {
+// unknownDir is homeModel.project for the sessions whose history has no
+// directory: "" already means the projects view. It can't be a real path
+// (NUL is never in one).
+const unknownDir = "\x00unknown"
+
+// projectKey is what homeModel.project holds for a project's Dir.
+func projectKey(dir string) string {
+	if dir == "" {
+		return unknownDir
+	}
+	return dir
+}
+
+// sessionsIn keeps the sessions of one project (a directory, or unknownDir).
+func sessionsIn(ss []sessions.Session, project string) []sessions.Session {
 	out := make([]sessions.Session, 0, len(ss))
 	for _, s := range ss {
-		if s.Dir == dir {
+		if projectKey(s.Dir) == project {
 			out = append(out, s)
 		}
 	}
@@ -100,7 +113,7 @@ func sessionsIn(ss []sessions.Session, dir string) []sessions.Session {
 
 // projectName is a directory's card title.
 func projectName(dir string) string {
-	if dir == "" {
+	if dir == "" || dir == unknownDir {
 		return "(unknown directory)"
 	}
 	return sessions.Sanitize(filepath.Base(dir)) // Dir is raw; sanitize to draw it

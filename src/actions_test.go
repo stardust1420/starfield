@@ -85,7 +85,7 @@ const testID = "12345678-aaaa-4bbb-8ccc-123456789abc"
 func TestResumeArgv(t *testing.T) {
 	f := &fakeOps{}
 	cfg := testCfg()
-	msg := resumeCmd(f, cfg, sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
+	msg := resumeCmd(f, cfg, sessions.Session{ID: testID, Dir: t.TempDir()}, 80, 24)()
 	if got, ok := msg.(startedMsg); !ok || got.name != "sf-12345678" {
 		t.Fatalf("msg = %#v; want startedMsg sf-12345678", msg)
 	}
@@ -129,11 +129,15 @@ func TestResumeMissingDirShowsError(t *testing.T) {
 	f := &fakeOps{}
 	m := homeWith(t, f, sessions.Session{ID: testID, Dir: "/definitely/not/here", Title: "t", State: sessions.Stopped})
 	m, cmd := press(m, "enter")
+	for _, msg := range runAll(cmd) {
+		next, _ := m.Update(msg)
+		m = next.(homeModel)
+	}
 	if m.status.kind != statusError || !regexp.MustCompile("directory gone").MatchString(m.status.text) {
 		t.Errorf("status = %q", m.status.text)
 	}
-	if cmd != nil {
-		cmd()
+	if len(m.starting) != 0 {
+		t.Errorf("starting = %v; the guard should be cleared", m.starting)
 	}
 	if len(f.names) != 0 {
 		t.Errorf("NewSession called: %v", f.names)
@@ -172,19 +176,31 @@ func TestEnterOnExternalDoesNotAttach(t *testing.T) {
 	}
 }
 
-func TestAttachDoneWithExitedSessionIsNotAnError(t *testing.T) {
+// tmux attach exits 0 on a detach and when the session ends while
+// attached; it exits non-zero only when the session is already gone, as
+// when claude --resume fails at once. That must not be silent.
+func TestAttachDoneReportsAGoneSession(t *testing.T) {
 	m := homeWith(t, &fakeOps{}, sessions.Session{ID: testID, Dir: "/x", State: sessions.Running})
-	next, cmd := m.Update(attachDoneMsg{name: "sf-x", err: &exec.ExitError{}})
+	next, cmd := m.Update(attachDoneMsg{name: "sf-x"})
 	m = next.(homeModel)
 	if m.status.text != "" {
-		t.Errorf("status = %q; want empty", m.status.text)
+		t.Errorf("a clean detach set status %q; want none", m.status.text)
+	}
+	if cmd == nil {
+		t.Errorf("want a refresh cmd")
+	}
+	m.inFlight = false // as if that refresh had returned
+	next, cmd = m.Update(attachDoneMsg{name: "sf-x", err: &exec.ExitError{}})
+	m = next.(homeModel)
+	if m.status.kind != statusError || !strings.Contains(m.status.text, "sf-x ended before it could attach") {
+		t.Errorf("status = %q; want the session reported gone", m.status.text)
 	}
 	if cmd == nil {
 		t.Errorf("want a refresh cmd")
 	}
 	next, _ = m.Update(attachDoneMsg{name: "sf-x", err: errors.New("no tty")})
-	if next.(homeModel).status.kind != statusError {
-		t.Errorf("other errors should show")
+	if st := next.(homeModel).status; st.kind != statusError || !strings.Contains(st.text, "attach: no tty") {
+		t.Errorf("other errors should show, got %q", st.text)
 	}
 }
 
@@ -265,7 +281,7 @@ func TestResumeDuplicateNameRetriesWithSuffix(t *testing.T) {
 	f := &fakeOps{newErrs: map[string]error{
 		"sf-12345678": errors.New("new-session: exit 1: duplicate session: sf-12345678"),
 	}}
-	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
+	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: t.TempDir()}, 80, 24)()
 	got, ok := msg.(startedMsg)
 	if !ok || !regexp.MustCompile(`^sf-12345678-[0-9a-f]{4}$`).MatchString(got.name) {
 		t.Fatalf("msg = %#v; want startedMsg with a suffixed name", msg)
@@ -292,7 +308,7 @@ func TestResumeDuplicateNameRetriesWithSuffix(t *testing.T) {
 
 func TestResumeDuplicateRetryFailureReported(t *testing.T) {
 	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: x")}
-	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
+	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: t.TempDir()}, 80, 24)()
 	if got, ok := msg.(startFailedMsg); !ok || got.name != "sf-12345678" {
 		t.Fatalf("msg = %#v; want startFailedMsg for the base name", msg)
 	}
@@ -303,7 +319,7 @@ func TestResumeDuplicateRetryFailureReported(t *testing.T) {
 
 func TestStartDuplicateDoesNotRetry(t *testing.T) {
 	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: x")}
-	msg := startWithID(f, testCfg(), "/x", testID, 80, 24)()
+	msg := startWithID(f, testCfg(), "/x", testID, false, 80, 24)()
 	if _, ok := msg.(startFailedMsg); !ok || len(f.names) != 1 {
 		t.Fatalf("msg = %#v, calls %v; want startFailedMsg after one call", msg, f.names)
 	}
@@ -332,7 +348,11 @@ func TestErrorStatusReadableAtNarrowWidths(t *testing.T) {
 		m := homeWith(t, &fakeOps{}, sessions.Session{ID: testID, Dir: "/Users/me/Developer/some-project", Title: "t", State: sessions.Stopped})
 		next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
 		m = next.(homeModel)
-		m, _ = press(m, "enter")
+		m, cmd := press(m, "enter")
+		for _, msg := range runAll(cmd) {
+			next, _ := m.Update(msg)
+			m = next.(homeModel)
+		}
 		if v := plain(m.View()); !strings.Contains(v, errText) {
 			t.Errorf("width %d: view lacks %q:\n%s", w, errText, v)
 		}
@@ -346,15 +366,16 @@ func TestConcurrentStartsTrackEachName(t *testing.T) {
 	m, c1 := m.startIn(t.TempDir())
 	m, c2 := m.startIn(t.TempDir())
 	if len(m.starting) != 2 {
-		t.Fatalf("starting = %v; want 2 names", m.starting)
+		t.Fatalf("starting = %v; want one guard per directory", m.starting)
 	}
 	msg1, msg2 := c1(), c2()
 	next, _ := m.Update(msg1)
 	m = next.(homeModel)
-	if len(m.starting) != 1 || !m.starting[msg2.(startedMsg).name] {
+	if len(m.starting) != 1 || !m.starting[msg2.(startedMsg).guard] {
 		t.Errorf("after first start: starting = %v; want only %v", m.starting, msg2)
 	}
-	next, _ = m.Update(startFailedMsg{name: msg2.(startedMsg).name, err: errors.New("x")})
+	s2 := msg2.(startedMsg)
+	next, _ = m.Update(startFailedMsg{name: s2.name, guard: s2.guard, err: errors.New("x")})
 	if got := next.(homeModel).starting; len(got) != 0 {
 		t.Errorf("after failure: starting = %v; want empty", got)
 	}

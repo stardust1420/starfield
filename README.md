@@ -81,8 +81,8 @@ Starfield opens on your **projects**: one card per directory that has Claude ses
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `STARFIELD_ROOTS` | `~/Developer` | colon-separated directories scanned for repos (depth 2) in the picker; new directories made from a plain name go in the first one |
-| `STARFIELD_HISTORY_DAYS` | `14` | starting window for stopped sessions, in days; once you pick one with `t` it is saved to `~/.config/starfield/settings.json` and used instead |
-| `STARFIELD_DETACH_KEY` | `C-]` | key that returns to the home screen; a plain tmux key name such as `C-]` or `C-q`. A changed key takes effect once the private tmux server restarts: when no starfield sessions are running, or after `tmux -L starfield kill-server` |
+| `STARFIELD_HISTORY_DAYS` | `14` | starting window for stopped sessions, in days (`0` is all time); once you pick one with `t` it is saved to `~/.config/starfield/settings.json` and used instead |
+| `STARFIELD_DETACH_KEY` | `C-]` | key that returns to the home screen; a plain tmux key name such as `C-]` or `C-q` (one with a space, comma, `;`, `#`, quote, `\`, brace or `$` is ignored and `C-]` used). A changed key takes effect once the private tmux server restarts: when no starfield sessions are running, or after `tmux -L starfield kill-server` |
 | `STARFIELD_CLAUDE_CMD` | `caffeinate -is claude` on macOS, `claude` elsewhere | command that launches Claude, split on whitespace |
 | `STARFIELD_REDUCED_MOTION` | unset | `1` keeps the starfield and busy glyph still |
 

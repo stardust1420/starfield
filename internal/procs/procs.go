@@ -2,6 +2,7 @@
 package procs
 
 import (
+	"os"
 	"os/exec"
 	"path"
 	"strconv"
@@ -79,9 +80,18 @@ func cutField(s string) (field, rest string, ok bool) {
 	return s[:i], strings.TrimLeft(s[i:], " \t"), true
 }
 
+// psCommand is the ps run by Snapshot. LC_ALL=C keeps lstart in English:
+// Claude records procStart that way, and SameStart can't match a start
+// time printed in another language.
+func psCommand() *exec.Cmd {
+	cmd := exec.Command("ps", "-axo", "pid=,ppid=,lstart=,comm=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	return cmd
+}
+
 // Snapshot runs ps and returns the current process table.
 func Snapshot() (Table, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,ppid=,lstart=,comm=").Output()
+	out, err := psCommand().Output()
 	if err != nil {
 		return nil, err
 	}

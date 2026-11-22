@@ -90,3 +90,9 @@ func (m homeModel) cycleHistory() (homeModel, tea.Cmd) {
 	refresh := m.refreshCmd()
 	return m, tea.Batch(status, refresh, saveSettingsCmd(m.deps.Cfg.StateDir, m.historyDays))
 }
+
+// windowCovers reports whether a discovery run with the window had found
+// everything the window want shows (0 is all time).
+func windowCovers(had, want int) bool {
+	return had == 0 || (want != 0 && want <= had)
+}

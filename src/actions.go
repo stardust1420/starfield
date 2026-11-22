@@ -2,9 +2,11 @@ package src
 
 import (
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,14 +33,19 @@ type attachDoneMsg struct {
 }
 
 // startedMsg means the tmux session name now exists and can be attached.
-// guard is the name the starting guard was set under (name, or the base
-// name a suffixed retry replaced).
-type startedMsg struct{ name, guard string }
+// guard is the key the starting guard was set under (the base name a
+// suffixed resume retry replaced, or "new:<dir>" for a new session). For a
+// new session, asked is the directory picked and dir the one it runs in:
+// asked with its symlinks resolved, as Claude records it.
+type startedMsg struct {
+	name, guard string
+	dir, asked  string
+}
 
 // startFailedMsg means creating the tmux session failed.
 type startFailedMsg struct {
-	name string
-	err  error
+	name, guard string
+	err         error
 }
 
 // attachCmd hands the terminal to tmux until the user detaches.
@@ -54,15 +61,6 @@ func claudeArgv(cfg config.Config, extra ...string) []string {
 	return append(append([]string{}, cfg.ClaudeCmd...), extra...)
 }
 
-func newSessionCmd(ops sessionOps, name, dir, id string, argv []string, w, h int) tea.Cmd {
-	return func() tea.Msg {
-		if err := ops.NewSession(name, dir, id, argv, w, h); err != nil {
-			return startFailedMsg{name: name, err: err}
-		}
-		return startedMsg{name: name, guard: name}
-	}
-}
-
 // resumeCmd starts a detached tmux session running `claude --resume <id>`.
 // If the name is taken (after /clear, the pane sf-<id8> carries a newer
 // id), it retries once under the name plus a random suffix rather than
@@ -70,6 +68,9 @@ func newSessionCmd(ops sessionOps, name, dir, id string, argv []string, w, h int
 func resumeCmd(ops sessionOps, cfg config.Config, s sessions.Session, w, h int) tea.Cmd {
 	name, argv := tmux.SessionName(s.ID), claudeArgv(cfg, "--resume", s.ID)
 	return func() tea.Msg {
+		if fi, err := os.Stat(s.Dir); err != nil || !fi.IsDir() {
+			return startFailedMsg{name: name, guard: name, err: errors.New("directory gone: " + s.Dir)}
+		}
 		err := ops.NewSession(name, s.Dir, s.ID, argv, w, h)
 		if err != nil && strings.Contains(err.Error(), "duplicate session") {
 			alt := name + "-" + randomHex(2)
@@ -78,7 +79,7 @@ func resumeCmd(ops sessionOps, cfg config.Config, s sessions.Session, w, h int) 
 			}
 		}
 		if err != nil {
-			return startFailedMsg{name: name, err: err}
+			return startFailedMsg{name: name, guard: name, err: err}
 		}
 		return startedMsg{name: name, guard: name}
 	}
@@ -95,12 +96,43 @@ func randomHex(n int) string {
 
 // startCmd starts a new Claude session with a fresh id in dir.
 func startCmd(ops sessionOps, cfg config.Config, dir string, w, h int) tea.Cmd {
-	return startWithID(ops, cfg, dir, newUUID(), w, h)
+	return startWithID(ops, cfg, dir, newUUID(), false, w, h)
 }
 
-// startWithID starts a new Claude session with the given id in dir.
-func startWithID(ops sessionOps, cfg config.Config, dir, id string, w, h int) tea.Cmd {
-	return newSessionCmd(ops, tmux.SessionName(id), dir, id, claudeArgv(cfg, "--session-id", id), w, h)
+// startWithID starts a new Claude session with the given id in dir, making
+// dir (and any missing parents) first when create is set. Everything that
+// touches the disk happens in the command, off the UI goroutine; a failure
+// comes back as startFailedMsg, so the starting guard is cleared.
+func startWithID(ops sessionOps, cfg config.Config, dir, id string, create bool, w, h int) tea.Cmd {
+	name, guard := tmux.SessionName(id), newGuard(dir)
+	argv := claudeArgv(cfg, "--session-id", id)
+	return func() tea.Msg {
+		if create {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return startFailedMsg{name: name, guard: guard, err: fmt.Errorf("create %s: %w", dir, err)}
+			}
+		}
+		real := resolveDir(dir)
+		if err := ops.NewSession(name, real, id, argv, w, h); err != nil {
+			return startFailedMsg{name: name, guard: guard, err: err}
+		}
+		return startedMsg{name: name, guard: guard, dir: real, asked: dir}
+	}
+}
+
+// newGuard is the starting-guard key for a new session in dir: one at a
+// time per directory, so a second n before the first is up does nothing.
+func newGuard(dir string) string { return "new:" + dir }
+
+// resolveDir is dir with its symlinks resolved (/tmp/x is /private/tmp/x
+// on macOS). Claude records its working directory that way, so the new
+// session lands in the same project as its history. dir itself if it
+// can't be resolved.
+func resolveDir(dir string) string {
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		return real
+	}
+	return dir
 }
 
 // newUUID returns a random RFC 4122 version 4 UUID.
@@ -124,7 +156,7 @@ func (m homeModel) windowSize() (int, int) {
 }
 
 func (m *homeModel) setStatus(kind int, text string) tea.Cmd {
-	return m.status.set(m.tickID, kind, text)
+	return m.status.set(kind, text)
 }
 
 // refreshCmd starts a discovery now, unless one is already in flight (its
@@ -153,10 +185,7 @@ func (m homeModel) enterKey() (homeModel, tea.Cmd) {
 		return m, cmd
 	}
 	if s.State == sessions.Stopped {
-		if fi, err := os.Stat(s.Dir); err != nil || !fi.IsDir() {
-			cmd := m.setStatus(statusError, "directory gone: "+s.Dir)
-			return m, cmd
-		}
+		// resumeCmd checks the directory still exists, off the UI goroutine.
 		name := tmux.SessionName(s.ID)
 		if m.starting[name] {
 			cmd := m.setStatus(statusProgress, "starting…")
@@ -182,8 +211,8 @@ func (m *homeModel) markStarting(name string) {
 	m.starting[name] = true
 }
 
-// startIn starts a new Claude session in dir (from the picker). The id is
-// made here so the starting guard knows the tmux name before the cmd runs.
+// startIn starts a new Claude session in dir. Only one start per directory
+// runs at a time.
 func (m homeModel) startIn(dir string) (homeModel, tea.Cmd) {
 	return m.startNew(dir, false)
 }
@@ -199,26 +228,13 @@ func (m homeModel) startNew(dir string, create bool) (homeModel, tea.Cmd) {
 		cmd := m.setStatus(statusError, "tmux unavailable")
 		return m, cmd
 	}
-	id := newUUID()
-	m.markStarting(tmux.SessionName(id))
+	if m.starting[newGuard(dir)] {
+		cmd := m.setStatus(statusProgress, "starting…")
+		return m, cmd
+	}
+	m.markStarting(newGuard(dir))
 	w, h := m.windowSize()
-	start := startWithID(m.ops, m.deps.Cfg, dir, id, w, h)
-	if !create {
-		return m, start
-	}
-	return m, createThenStart(dir, tmux.SessionName(id), start)
-}
-
-// createThenStart runs start once dir exists. mkdir happens in the command,
-// off the UI goroutine; a failure is reported like a failed start, so the
-// starting guard for name is cleared.
-func createThenStart(dir, name string, start tea.Cmd) tea.Cmd {
-	return func() tea.Msg {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return startFailedMsg{name: name, err: fmt.Errorf("create %s: %w", dir, err)}
-		}
-		return start()
-	}
+	return m, startWithID(m.ops, m.deps.Cfg, dir, newUUID(), create, w, h)
 }
 
 // stopKey opens the stop confirmation for the selected session.

@@ -70,3 +70,40 @@ func TestDefaultClaudeCmdPerOS(t *testing.T) {
 		}
 	}
 }
+
+func TestHistoryDaysZeroMeansAllTime(t *testing.T) {
+	c := Load(func(k string) string {
+		if k == "STARFIELD_HISTORY_DAYS" {
+			return "0"
+		}
+		return ""
+	}, "/home/u")
+	if c.HistoryDays != 0 {
+		t.Errorf("HistoryDays = %d; want 0 (all time)", c.HistoryDays)
+	}
+}
+
+func TestDetachKeyIsValidated(t *testing.T) {
+	for k, want := range map[string]string{
+		"C-]":      "C-]",
+		"M-q":      "M-q",
+		"C-M-x":    "C-M-x",
+		"F12":      "F12",
+		"C-a,b":    "C-]", // a comma breaks the status-line format
+		"C-a b":    "C-]", // whitespace breaks bind
+		"C-a;kill": "C-]",
+		"#":        "C-]",
+		"C-{":      "C-]",
+		"C-":       "C-]",
+	} {
+		c := Load(func(name string) string {
+			if name == "STARFIELD_DETACH_KEY" {
+				return k
+			}
+			return ""
+		}, "/home/u")
+		if c.DetachKey != want {
+			t.Errorf("STARFIELD_DETACH_KEY=%q gave %q; want %q", k, c.DetachKey, want)
+		}
+	}
+}

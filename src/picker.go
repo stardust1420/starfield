@@ -55,13 +55,46 @@ type scannedMsg struct {
 // pickerRow is one result: a candidate, its path as shown (~ for home),
 // the byte offsets of the query's matched characters in that string, and,
 // for a typed path or a new name, whether it exists but isn't a directory
-// (bad) or doesn't exist yet and enter will create it (create).
+// (bad) or doesn't exist yet and enter will create it (create). Until its
+// check is back (unchecked) it is neither.
 type pickerRow struct {
-	cand   dirs.Candidate
-	disp   string
-	pos    []int
-	bad    bool
-	create bool
+	cand      dirs.Candidate
+	disp      string
+	pos       []int
+	bad       bool
+	create    bool
+	unchecked bool
+}
+
+// pathState is what a check of a typed path found.
+type pathState int
+
+const (
+	pathDir     pathState = iota + 1 // an existing directory
+	pathMissing                      // nothing there yet: enter creates it
+	pathBad                          // a file, or it can't be checked
+)
+
+// pathCheckedMsg is the result of checking a typed path on disk, done in a
+// command so a slow disk (a hung network mount) can't freeze the picker.
+type pathCheckedMsg struct {
+	id    int
+	path  string
+	state pathState
+}
+
+func checkPathCmd(id int, p string) tea.Cmd {
+	return func() tea.Msg {
+		fi, err := os.Stat(p)
+		st := pathDir
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			st = pathMissing
+		case err != nil || !fi.IsDir():
+			st = pathBad
+		}
+		return pathCheckedMsg{id: id, path: p, state: st}
+	}
 }
 
 type pickerModel struct {
@@ -76,6 +109,7 @@ type pickerModel struct {
 	home, cwd     string
 	err           string // inline error from the last enter
 	now           func() time.Time
+	checks        map[string]pathState // typed paths checked so far
 }
 
 func initPickerModel(back homeModel, cands []dirs.Candidate, width, height int) pickerModel {
@@ -90,6 +124,7 @@ func initPickerModel(back homeModel, cands []dirs.Candidate, width, height int) 
 		home:   back.home,
 		cwd:    cwd,
 		now:    time.Now,
+		checks: map[string]pathState{},
 	}
 	m.refilter()
 	return m
@@ -116,11 +151,11 @@ func scanCmd(id int, hist []claude.HistorySession, roots []string) tea.Cmd {
 	}
 }
 
-// newKey opens the picker with the recent dirs right away and scans the
-// roots in the background.
+// newKey opens the picker with the recent dirs right away (unchecked: the
+// scan drops any that are gone) and scans the roots in the background.
 func (m homeModel) newKey() (tea.Model, tea.Cmd) {
 	hist := historyOf(m.all)
-	p := initPickerModel(m, dirs.Candidates(hist, nil, scanDepth), m.width, m.height)
+	p := initPickerModel(m, dirs.Recents(hist), m.width, m.height)
 	return p, scanCmd(p.id, hist, m.deps.Cfg.Roots)
 }
 
@@ -187,6 +222,7 @@ func (m pickerModel) buildRows() []pickerRow {
 			listed = listed || r.cand.Path == p
 		}
 		if r := m.pathRow(p); !listed && !r.bad {
+			// Shown until its check says it's a file.
 			rows = append(rows, r)
 		}
 	}
@@ -195,17 +231,31 @@ func (m pickerModel) buildRows() []pickerRow {
 
 // pathRow is the row for a path the user named rather than picked: an
 // existing directory, one enter will create (it doesn't exist yet), or bad
-// (it exists but isn't a directory, or can't be checked).
+// (it exists but isn't a directory, or can't be checked), as far as its
+// check (checkCmds) has said.
 func (m pickerModel) pathRow(p string) pickerRow {
 	r := pickerRow{cand: dirs.Candidate{Path: p, Source: dirs.Typed}, disp: tildePath(p, m.home)}
-	fi, err := os.Stat(p)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
+	switch m.checks[p] {
+	case pathMissing:
 		r.create = true
-	case err != nil || !fi.IsDir():
+	case pathBad:
 		r.bad = true
+	case pathDir:
+	default:
+		r.unchecked = true
 	}
 	return r
+}
+
+// checkCmds checks the shown typed paths that haven't been checked yet.
+func (m pickerModel) checkCmds() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, r := range m.rows {
+		if r.unchecked {
+			cmds = append(cmds, checkPathCmd(m.id, r.cand.Path))
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 // isDirName reports whether q can be used as one new directory name.
@@ -263,6 +313,12 @@ func (m pickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refilter()
 		}
 		return m, nil
+	case pathCheckedMsg:
+		if msg.id == m.id {
+			m.checks[msg.path] = msg.state
+			m.refilter()
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case startedMsg:
@@ -304,7 +360,7 @@ func (m pickerModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.refilter()
 		}
-		return m, nil
+		return m, m.checkCmds()
 	case "enter":
 		return m.start()
 	}
@@ -314,6 +370,7 @@ func (m pickerModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = 0
 		m.rows = nil // a new query starts at the best match
 		m.refilter()
+		return m, m.checkCmds()
 	}
 	return m, nil
 }
@@ -339,7 +396,9 @@ func (m pickerModel) start() (tea.Model, tea.Cmd) {
 	// Land on the new session's project, so detaching comes back to it.
 	h := m.back.resume(m.width, m.height).openProject(r.cand.Path)
 	var cmd tea.Cmd
-	if r.create {
+	if r.create || r.unchecked {
+		// MkdirAll does nothing to a directory that exists, and fails on a
+		// file, so an unchecked path is safe to start this way.
 		h, cmd = h.createIn(r.cand.Path)
 	} else {
 		h, cmd = h.startIn(r.cand.Path)

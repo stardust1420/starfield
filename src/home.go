@@ -35,6 +35,7 @@ type discoveredMsg struct {
 	// discovery. Only those results arm the next tick; a refresh started by
 	// an attach or a stop must not, or every one of them would add a loop.
 	fromTick bool
+	days     int // the history window it was run with
 }
 
 // discoverMu serialises Discover calls: a discovery started by a screen
@@ -47,12 +48,12 @@ var discoverMu sync.Mutex
 func discoverCmd(d *sessions.Discoverer, id int, fromTick bool, days int) tea.Cmd {
 	return func() tea.Msg {
 		if d == nil {
-			return discoveredMsg{id: id, fromTick: fromTick}
+			return discoveredMsg{id: id, fromTick: fromTick, days: days}
 		}
 		discoverMu.Lock()
 		defer discoverMu.Unlock()
 		ss, err := d.DiscoverWithin(days)
-		return discoveredMsg{id: id, sessions: ss, err: err, fromTick: fromTick}
+		return discoveredMsg{id: id, sessions: ss, err: err, fromTick: fromTick, days: days}
 	}
 }
 
@@ -209,13 +210,14 @@ func (m *homeModel) rebuild() {
 }
 
 // openProject switches to dir's sessions, with a fresh filter. The projects
-// view's filter and selection are kept for esc.
+// view's filter and selection are kept for esc. dir "" opens the sessions
+// with no recorded directory.
 func (m homeModel) openProject(dir string) homeModel {
 	if m.project == "" {
 		m.projFilter = m.filter
 	}
 	m.projKey = "project:" + dir
-	m.project = dir
+	m.project = projectKey(dir)
 	m.filter = newFilterBar()
 	m.keys = sessionKeys
 	m.grid.cursor, m.grid.offset = 0, 0
@@ -315,20 +317,25 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		if msg.err != nil {
 			text := "discovery: " + msg.err.Error()
-			cmd = m.status.set(m.tickID, statusError, text)
+			cmd = m.status.set(statusError, text)
 			m.discErr = text
 		} else if m.discErr != "" {
 			if m.status.text == m.discErr {
-				m.status.set(m.tickID, statusSuccess, "")
+				m.status.set(statusSuccess, "")
 			}
 			m.discErr = ""
 		}
 		m.rebuild()
-		var next tea.Cmd
+		var next, again tea.Cmd
 		if msg.fromTick {
 			next = scheduleTick(m.tickID)
 		}
-		return m, tea.Batch(cmd, next, m.previewCmd())
+		if !windowCovers(msg.days, m.historyDays) {
+			// t widened the window while this discovery ran with the old
+			// one: fetch what the new window adds now, not a tick later.
+			again = m.refreshCmd()
+		}
+		return m, tea.Batch(cmd, next, again, m.previewCmd())
 
 	case frameMsg:
 		if msg.id != m.tickID {
@@ -346,16 +353,28 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case startedMsg:
 		delete(m.starting, msg.name)
 		delete(m.starting, msg.guard)
+		if msg.asked != "" && msg.dir != msg.asked && m.project == msg.asked {
+			// The picked path had a symlink in it; its sessions are
+			// recorded under the real path, so show that project.
+			m = m.openProject(msg.dir)
+		}
 		return m, attachCmd(m.ops, msg.name)
 
 	case startFailedMsg:
 		delete(m.starting, msg.name)
+		delete(m.starting, msg.guard)
 		return m, m.setStatus(statusError, msg.err.Error())
 
 	case attachDoneMsg:
 		var cmd tea.Cmd
 		var ee *exec.ExitError
-		if msg.err != nil && !errors.As(msg.err, &ee) {
+		switch {
+		case errors.As(msg.err, &ee):
+			// tmux attach exits 0 on a detach and when the session ends
+			// while attached; non-zero means the session was already gone,
+			// e.g. claude --resume failed at once.
+			cmd = m.setStatus(statusError, msg.name+" ended before it could attach — claude may have failed to start")
+		case msg.err != nil:
 			cmd = m.setStatus(statusError, "attach: "+msg.err.Error())
 		}
 		refresh := m.refreshCmd()
@@ -376,7 +395,7 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case clearStatusMsg:
-		m.status.clear(msg, m.tickID)
+		m.status.clear(msg)
 		return m, nil
 
 	case tea.KeyMsg:
@@ -397,7 +416,7 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd, done := handleConfirmKey(m.confirm, msg)
 		if done {
 			if cmd != nil {
-				m.status.set(m.tickID, statusProgress, m.confirm.progress)
+				m.status.set(statusProgress, m.confirm.progress)
 			}
 			m.confirm = nil
 			m.layout()
@@ -438,6 +457,9 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.New):
 		if m.project == "" {
 			return m.newKey()
+		}
+		if m.project == unknownDir {
+			return m, m.setStatus(statusError, "no directory to start in — n on the projects view picks one")
 		}
 		return m.startIn(m.project)
 	case m.project == "":

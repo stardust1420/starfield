@@ -82,17 +82,17 @@ const (
 
 // statusLine is the message at the right end of the bottom bar. Success
 // messages clear themselves after a few seconds; seq makes sure an older
-// timer doesn't clear a newer message.
+// timer doesn't clear a newer message. The timer isn't tied to a tick id:
+// the home screen gets a new one on every resume (back from the picker or
+// an attach), and a timer dropped for that would leave the message up for
+// good.
 type statusLine struct {
 	text string
 	kind int
 	seq  int
 }
 
-type clearStatusMsg struct {
-	screen int // tickID of the screen that set it
-	seq    int
-}
+type clearStatusMsg struct{ seq int }
 
 // statusClearDelay is how long a success stays; a var so tests can shorten it.
 var statusClearDelay = 4 * time.Second
@@ -112,7 +112,7 @@ func (s statusLine) render() string {
 
 // set replaces the message and, for a success, returns a command that
 // clears it later.
-func (s *statusLine) set(screen int, kind int, text string) tea.Cmd {
+func (s *statusLine) set(kind int, text string) tea.Cmd {
 	s.seq++
 	s.text, s.kind = text, kind
 	if kind != statusSuccess || text == "" {
@@ -120,12 +120,12 @@ func (s *statusLine) set(screen int, kind int, text string) tea.Cmd {
 	}
 	seq := s.seq
 	return tea.Tick(statusClearDelay, func(time.Time) tea.Msg {
-		return clearStatusMsg{screen: screen, seq: seq}
+		return clearStatusMsg{seq: seq}
 	})
 }
 
-func (s *statusLine) clear(msg clearStatusMsg, screen int) {
-	if msg.screen == screen && msg.seq == s.seq {
+func (s *statusLine) clear(msg clearStatusMsg) {
+	if msg.seq == s.seq {
 		s.text = ""
 	}
 }

@@ -45,13 +45,37 @@ func pickerKey(k string) tea.KeyMsg {
 func typeInto(t *testing.T, p pickerModel, s string) pickerModel {
 	t.Helper()
 	for _, r := range s {
-		next, _ := p.Update(pickerKey(string(r)))
+		next, cmd := p.Update(pickerKey(string(r)))
 		var ok bool
 		if p, ok = next.(pickerModel); !ok {
 			t.Fatalf("typing %q left the picker (%T)", r, next)
 		}
+		p = deliverChecks(p, cmd)
 	}
 	return p
+}
+
+// deliverChecks runs cmd and feeds the path checks it made back to p, as
+// the Bubble Tea runtime would.
+func deliverChecks(p pickerModel, cmd tea.Cmd) pickerModel {
+	for _, msg := range runAll(cmd) {
+		if c, ok := msg.(pathCheckedMsg); ok {
+			next, _ := p.Update(c)
+			p = next.(pickerModel)
+		}
+	}
+	return p
+}
+
+// realPath is p with its symlinks resolved (t.TempDir() is under a
+// symlink on macOS: /tmp and /var/folders both live in /private).
+func realPath(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }
 
 // runAll runs cmd and every command a tea.Batch inside it holds, and
@@ -130,10 +154,10 @@ func TestPickerEnterStartsInSelectedDir(t *testing.T) {
 	if started == nil {
 		t.Fatal("no startedMsg")
 	}
-	if len(f.dirs) != 1 || f.dirs[0] != dir {
-		t.Errorf("NewSession dirs = %v; want [%s]", f.dirs, dir)
+	if len(f.dirs) != 1 || f.dirs[0] != realPath(t, dir) {
+		t.Errorf("NewSession dirs = %v; want [%s]", f.dirs, realPath(t, dir))
 	}
-	if !home.starting[started.name] {
+	if !home.starting[started.guard] {
 		t.Errorf("starting %v lacks %s", home.starting, started.name)
 	}
 }
@@ -218,10 +242,10 @@ func TestPickerEnterCreatesDirAndStarts(t *testing.T) {
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		t.Fatalf("directory not created: %v", err)
 	}
-	if len(f.dirs) != 1 || f.dirs[0] != dir {
-		t.Errorf("NewSession dirs = %v; want [%s]", f.dirs, dir)
+	if len(f.dirs) != 1 || f.dirs[0] != realPath(t, dir) {
+		t.Errorf("NewSession dirs = %v; want [%s]", f.dirs, realPath(t, dir))
 	}
-	if !home.starting[started.name] {
+	if !home.starting[started.guard] {
 		t.Errorf("starting %v lacks %s", home.starting, started.name)
 	}
 }
