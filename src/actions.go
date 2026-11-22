@@ -128,13 +128,14 @@ func (m *homeModel) setStatus(kind int, text string) tea.Cmd {
 }
 
 // refreshCmd starts a discovery now, unless one is already in flight (its
-// result will serve).
+// result will serve). Its result doesn't arm a tick: the refresh loop keeps
+// running on its own timer, so a refresh never adds a second loop.
 func (m *homeModel) refreshCmd() tea.Cmd {
 	if m.inFlight {
 		return nil
 	}
 	m.inFlight = true
-	return discoverCmd(m.deps.Disc, m.tickID)
+	return discoverCmd(m.deps.Disc, m.tickID, false)
 }
 
 // enterKey attaches to or resumes the selected session.

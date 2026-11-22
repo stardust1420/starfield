@@ -31,6 +31,10 @@ type discoveredMsg struct {
 	id       int
 	sessions []sessions.Session
 	err      error
+	// fromTick is set when the refresh loop's own tick started the
+	// discovery. Only those results arm the next tick; a refresh started by
+	// an attach or a stop must not, or every one of them would add a loop.
+	fromTick bool
 }
 
 // discoverMu serialises Discover calls: a discovery started by a screen
@@ -40,15 +44,15 @@ type discoveredMsg struct {
 var discoverMu sync.Mutex
 
 // discoverCmd runs a discovery off the UI goroutine.
-func discoverCmd(d *sessions.Discoverer, id int) tea.Cmd {
+func discoverCmd(d *sessions.Discoverer, id int, fromTick bool) tea.Cmd {
 	return func() tea.Msg {
 		if d == nil {
-			return discoveredMsg{id: id}
+			return discoveredMsg{id: id, fromTick: fromTick}
 		}
 		discoverMu.Lock()
 		defer discoverMu.Unlock()
 		ss, err := d.Discover()
-		return discoveredMsg{id: id, sessions: ss, err: err}
+		return discoveredMsg{id: id, sessions: ss, err: err, fromTick: fromTick}
 	}
 }
 
@@ -209,11 +213,16 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		if msg.id != m.tickID || m.inFlight {
+		if msg.id != m.tickID {
 			return m, nil
 		}
+		if m.inFlight {
+			// A refresh is already running and won't arm a tick, so this
+			// tick keeps the loop alive by rescheduling itself.
+			return m, scheduleTick(m.tickID)
+		}
 		m.inFlight = true
-		return m, discoverCmd(m.deps.Disc, m.tickID)
+		return m, discoverCmd(m.deps.Disc, m.tickID, true)
 
 	case discoveredMsg:
 		if msg.id != m.tickID {
@@ -238,7 +247,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.discErr = ""
 		}
 		m.rebuild()
-		return m, tea.Batch(cmd, tickCmd(m.tickID), m.previewCmd())
+		var next tea.Cmd
+		if msg.fromTick {
+			next = scheduleTick(m.tickID)
+		}
+		return m, tea.Batch(cmd, next, m.previewCmd())
 
 	case frameMsg:
 		if msg.id != m.tickID {

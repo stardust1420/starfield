@@ -24,6 +24,10 @@ func newTickID() int {
 // refreshInterval is how often a screen refreshes its data.
 const refreshInterval = 2 * time.Second
 
+// scheduleTick arms the next refresh. It is tickCmd; tests swap it to count
+// how many refresh loops a screen is running.
+var scheduleTick = tickCmd
+
 func tickCmd(id int) tea.Cmd {
 	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg{id: id, t: t}
