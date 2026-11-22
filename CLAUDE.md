@@ -20,6 +20,13 @@ Unit tests cover the pure helpers and the screens driven with a fake `sessionOps
 
 Sandbox notes: git writes (`git add`, `git commit`), `go mod tidy` and anything that talks to a tmux socket fail inside the Bash sandbox; run them with the sandbox disabled.
 
+- Run the full suite both inside and outside the sandbox before committing: `t.TempDir()` is a short `/tmp/claude-…` path inside but a long `/var/folders/…` one outside, which has already exposed a layout bug. Piping `go test` through `grep` hides its exit status; check `${pipestatus[1]}` (zsh).
+- `go test ./internal/tmux/ -run TestTmuxLifecycle -v -count=1` with the sandbox disabled is the only real tmux check (it skips inside); it must say PASS, not SKIP.
+- Smoke-test discovery on real data with a temporary test calling `sessions.NewDiscoverer(config.Load(os.Getenv, home), nil).Discover()`, run with the sandbox disabled (`ps` there sees the user's processes); delete it afterwards.
+- `runAll` (picker_test.go) runs every command, `tea.Tick` included, so a success status waits out its 4 s clear: call `fastStatus(t)`. Swap `scheduleTick` (`countTicks(t)`) to count refresh loops instead of running them.
+- Test helpers: `homeWith` (actions_test.go) opens the first session's project; `homeLoaded`/`send`/`keyMsg` (projects_test.go) drive the projects view; `testPicker`/`typeInto`/`pickerKey` drive the picker.
+- Glyphs in cards, rows and badges must be single-width (`●◐◌○◔✦⎇◷▸▌`, ASCII `+`); a double-width one like `＋` breaks the alignment.
+
 To see a screen without a TTY, add a temporary `src/zz_*_tmp_test.go` that builds the model (`InitHomeModel(Deps{Cfg: testCfg()}, w, h)`, fake `ops`), sends it `discoveredMsg` / `tea.KeyMsg`s, runs any returned `tea.Cmd` and feeds the result back, then prints `ansi.Strip(m.View())`. Delete it afterwards.
 
 ## Architecture
