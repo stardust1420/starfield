@@ -245,11 +245,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, frameCmd(m.tickID)
 
 	case startedMsg:
-		m.starting = nil
+		delete(m.starting, msg.name)
 		return m, attachCmd(m.ops, msg.name)
 
 	case startFailedMsg:
-		m.starting = nil
+		delete(m.starting, msg.name)
 		return m, m.setStatus(statusError, msg.err.Error())
 
 	case attachDoneMsg:
@@ -322,7 +322,9 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.enterKey()
 	case msg.String() == "x":
 		return m.stopKey()
-	// n (new-session picker) lands in Task 9, p (preview) in Task 10.
+	case key.Matches(msg, m.keys.New):
+		return m.newKey()
+	// p (preview) lands in Task 10.
 	default:
 		m.grid.handleKey(msg)
 	}

@@ -72,7 +72,11 @@ func resumeCmd(ops sessionOps, cfg config.Config, s sessions.Session, w, h int) 
 
 // startCmd starts a new Claude session with a fresh id in dir.
 func startCmd(ops sessionOps, cfg config.Config, dir string, w, h int) tea.Cmd {
-	id := newUUID()
+	return startWithID(ops, cfg, dir, newUUID(), w, h)
+}
+
+// startWithID starts a new Claude session with the given id in dir.
+func startWithID(ops sessionOps, cfg config.Config, dir, id string, w, h int) tea.Cmd {
 	return newSessionCmd(ops, tmux.SessionName(id), dir, id, claudeArgv(cfg, "--session-id", id), w, h)
 }
 
@@ -130,7 +134,7 @@ func (m homeModel) enterKey() (homeModel, tea.Cmd) {
 			cmd := m.setStatus(statusProgress, "starting…")
 			return m, cmd
 		}
-		m.starting = map[string]bool{name: true}
+		m.markStarting(name)
 		w, h := m.windowSize()
 		return m, resumeCmd(m.ops, m.deps.Cfg, *s, w, h)
 	}
@@ -139,6 +143,28 @@ func (m homeModel) enterKey() (homeModel, tea.Cmd) {
 		name = tmux.SessionName(s.ID)
 	}
 	return m, attachCmd(m.ops, name)
+}
+
+// markStarting records that the tmux session name is being created, so a
+// second enter on it is ignored until startedMsg or startFailedMsg.
+func (m *homeModel) markStarting(name string) {
+	if m.starting == nil {
+		m.starting = map[string]bool{}
+	}
+	m.starting[name] = true
+}
+
+// startIn starts a new Claude session in dir (from the picker). The id is
+// made here so the starting guard knows the tmux name before the cmd runs.
+func (m homeModel) startIn(dir string) (homeModel, tea.Cmd) {
+	if m.ops == nil {
+		cmd := m.setStatus(statusError, "tmux unavailable")
+		return m, cmd
+	}
+	id := newUUID()
+	m.markStarting(tmux.SessionName(id))
+	w, h := m.windowSize()
+	return m, startWithID(m.ops, m.deps.Cfg, dir, id, w, h)
 }
 
 // stopKey opens the stop confirmation for the selected session.

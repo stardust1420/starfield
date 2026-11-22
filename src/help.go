@@ -96,12 +96,13 @@ func (k keyMap) FullHelp() [][]key.Binding {
 
 // homeKeyMap is the help of the home screen. Its short help is compact so
 // a status message still fits beside it at 80 columns. Tasks that add
-// session actions (enter, n, x, p) append their bindings to actions.
+// session actions (enter, x, p) append their bindings to actions.
 type homeKeyMap struct {
 	keyMap
 	Move        key.Binding // short form of keyMap.Up
 	HelpShort   key.Binding // short form of keyMap.Help
 	RunningOnly key.Binding
+	New         key.Binding
 	actions     []key.Binding
 }
 
@@ -110,6 +111,7 @@ var homeKeys = homeKeyMap{
 	Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
 	HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+	New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	actions: []key.Binding{
 		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "attach")),
 		key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "stop")),
@@ -117,16 +119,16 @@ var homeKeys = homeKeyMap{
 }
 
 func (k homeKeyMap) ShortHelp() []key.Binding {
-	// Only the primary action; the rest are in the full help, so a status
-	// message has room beside the keys.
-	short := append([]key.Binding{}, k.actions[:1]...)
+	// Only the primary actions (attach, new); the rest are in the full
+	// help, so a status message has room beside the keys.
+	short := append([]key.Binding{}, k.actions[0], k.New)
 	return append(short, k.RunningOnly, filterKey, k.HelpShort, quitKey)
 }
 
 func (k homeKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down},
-		append(append([]key.Binding{}, k.actions...), k.RunningOnly),
+		append(append([]key.Binding{k.actions[0], k.New}, k.actions[1:]...), k.RunningOnly),
 		{filterKey, k.Help, quitKey},
 	}
 }

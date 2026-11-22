@@ -259,3 +259,24 @@ func TestErrorStatusReadableAtNarrowWidths(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentStartsTrackEachName(t *testing.T) {
+	f := &fakeOps{}
+	m := InitHomeModel(Deps{Cfg: testCfg()}, 100, 30)
+	m.ops = f
+	m, c1 := m.startIn(t.TempDir())
+	m, c2 := m.startIn(t.TempDir())
+	if len(m.starting) != 2 {
+		t.Fatalf("starting = %v; want 2 names", m.starting)
+	}
+	msg1, msg2 := c1(), c2()
+	next, _ := m.Update(msg1)
+	m = next.(homeModel)
+	if len(m.starting) != 1 || !m.starting[msg2.(startedMsg).name] {
+		t.Errorf("after first start: starting = %v; want only %v", m.starting, msg2)
+	}
+	next, _ = m.Update(startFailedMsg{name: msg2.(startedMsg).name, err: errors.New("x")})
+	if got := next.(homeModel).starting; len(got) != 0 {
+		t.Errorf("after failure: starting = %v; want empty", got)
+	}
+}
