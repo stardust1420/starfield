@@ -117,7 +117,16 @@ func renderPanelColored(width int, title, body string, lines int, border lipglos
 
 // renderBottomBar puts the help keys on the left and an already styled
 // status message (if any) right-aligned on the same line.
-func renderBottomBar(width int, helpView, st string) string {
+func renderBottomBar(width int, helpView, st string, statusFirst bool) string {
+	if statusFirst && st != "" && width > 0 {
+		// An error is never cut: the help gives way to it.
+		room := max(1, width-lipgloss.Width(st)-2-2*textIndent)
+		lines := strings.Split(helpView, "\n")
+		for i, l := range lines {
+			lines[i] = ansiTruncate(l, room)
+		}
+		helpView = strings.Join(lines, "\n")
+	}
 	help := lipgloss.NewStyle().PaddingLeft(textIndent).Render(helpView)
 	if st == "" {
 		return help

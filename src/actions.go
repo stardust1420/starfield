@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -32,7 +33,10 @@ type attachDoneMsg struct {
 type startedMsg struct{ name string }
 
 // startFailedMsg means creating the tmux session failed.
-type startFailedMsg struct{ err error }
+type startFailedMsg struct {
+	name string
+	err  error
+}
 
 // attachCmd hands the terminal to tmux until the user detaches.
 func attachCmd(ops sessionOps, name string) tea.Cmd {
@@ -50,7 +54,12 @@ func claudeArgv(cfg config.Config, extra ...string) []string {
 func newSessionCmd(ops sessionOps, name, dir, id string, argv []string, w, h int) tea.Cmd {
 	return func() tea.Msg {
 		if err := ops.NewSession(name, dir, id, argv, w, h); err != nil {
-			return startFailedMsg{err: err}
+			// The session already exists (a second start raced the first):
+			// attach to it.
+			if strings.Contains(err.Error(), "duplicate session") {
+				return startedMsg{name: name}
+			}
+			return startFailedMsg{name: name, err: err}
 		}
 		return startedMsg{name: name}
 	}
@@ -116,6 +125,12 @@ func (m homeModel) enterKey() (homeModel, tea.Cmd) {
 			cmd := m.setStatus(statusError, "directory gone: "+s.Dir)
 			return m, cmd
 		}
+		name := tmux.SessionName(s.ID)
+		if m.starting[name] {
+			cmd := m.setStatus(statusProgress, "starting…")
+			return m, cmd
+		}
+		m.starting = map[string]bool{name: true}
 		w, h := m.windowSize()
 		return m, resumeCmd(m.ops, m.deps.Cfg, *s, w, h)
 	}

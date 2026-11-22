@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"reflect"
 	"regexp"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -217,5 +218,44 @@ func TestNilOpsShowsUnavailable(t *testing.T) {
 	m, _ = press(m, "enter")
 	if m.status.text != "tmux unavailable" {
 		t.Errorf("status = %q", m.status.text)
+	}
+}
+
+func TestDoubleEnterStartsOnce(t *testing.T) {
+	f := &fakeOps{}
+	m := homeWith(t, f, sessions.Session{ID: testID, Dir: t.TempDir(), Title: "t", State: sessions.Stopped})
+	m, c1 := press(m, "enter")
+	m, c2 := press(m, "enter")
+	if c1 == nil || c2 != nil {
+		t.Fatalf("first cmd nil=%v, second nil=%v; want only the first", c1 == nil, c2 == nil)
+	}
+	msg := c1()
+	if len(f.names) != 1 {
+		t.Errorf("NewSession calls = %v; want 1", f.names)
+	}
+	next, _ := m.Update(msg)
+	if len(next.(homeModel).starting) != 0 {
+		t.Errorf("starting not cleared")
+	}
+}
+
+func TestDuplicateSessionErrorAttachesAnyway(t *testing.T) {
+	f := &fakeOps{newErr: errors.New("new-session: exit 1: duplicate session: sf-12345678")}
+	msg := resumeCmd(f, testCfg(), sessions.Session{ID: testID, Dir: "/x"}, 80, 24)()
+	if got, ok := msg.(startedMsg); !ok || got.name != "sf-12345678" {
+		t.Errorf("msg = %#v; want startedMsg", msg)
+	}
+}
+
+func TestErrorStatusReadableAtNarrowWidths(t *testing.T) {
+	const errText = "directory gone: /Users/me/Developer/some-project"
+	for _, w := range []int{80, 100} {
+		m := homeWith(t, &fakeOps{}, sessions.Session{ID: testID, Dir: "/Users/me/Developer/some-project", Title: "t", State: sessions.Stopped})
+		next, _ := m.Update(tea.WindowSizeMsg{Width: w, Height: 30})
+		m = next.(homeModel)
+		m, _ = press(m, "enter")
+		if v := plain(m.View()); !strings.Contains(v, errText) {
+			t.Errorf("width %d: view lacks %q:\n%s", w, errText, v)
+		}
 	}
 }

@@ -117,7 +117,9 @@ var homeKeys = homeKeyMap{
 }
 
 func (k homeKeyMap) ShortHelp() []key.Binding {
-	short := append([]key.Binding{k.Move}, k.actions...)
+	// Only the primary action; the rest are in the full help, so a status
+	// message has room beside the keys.
+	short := append([]key.Binding{}, k.actions[:1]...)
 	return append(short, k.RunningOnly, filterKey, k.HelpShort, quitKey)
 }
 

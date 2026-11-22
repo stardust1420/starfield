@@ -212,7 +212,7 @@ func TestTildePath(t *testing.T) {
 
 func TestDiscoveryErrorKeepsPreviousSessions(t *testing.T) {
 	ss := []sessions.Session{{ID: "a", Dir: "/x", Title: "A", State: sessions.Stopped}}
-	m := InitHomeModel(Deps{}, 120, 30) // wide enough for the help and the error
+	m := InitHomeModel(Deps{}, 100, 30)
 	update := func(msg discoveredMsg) {
 		next, _ := m.Update(msg)
 		m = next.(homeModel)

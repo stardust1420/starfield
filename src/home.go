@@ -58,7 +58,8 @@ func discoverCmd(d *sessions.Discoverer, id int) tea.Cmd {
 // to list, the starfield.
 type homeModel struct {
 	deps          Deps
-	ops           sessionOps // nil when tmux is unavailable
+	ops           sessionOps      // nil when tmux is unavailable
+	starting      map[string]bool // tmux sessions being created, so a second enter is ignored
 	help          help.Model
 	keys          homeKeyMap
 	width, height int
@@ -244,9 +245,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, frameCmd(m.tickID)
 
 	case startedMsg:
+		m.starting = nil
 		return m, attachCmd(m.ops, msg.name)
 
 	case startFailedMsg:
+		m.starting = nil
 		return m, m.setStatus(statusError, msg.err.Error())
 
 	case attachDoneMsg:
@@ -342,7 +345,7 @@ func (m homeModel) View() string {
 	if m.confirm != nil {
 		panel = renderConfirmPanel(w, m.confirm)
 	}
-	bottom := renderBottomBar(w, m.bottomLeft(), m.status.render())
+	bottom := renderBottomBar(w, m.bottomLeft(), m.status.render(), m.status.kind == statusError)
 	return renderGridPage(header, m.grid.view(empty), panel, bottom)
 }
 
