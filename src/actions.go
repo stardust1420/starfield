@@ -135,7 +135,7 @@ func (m *homeModel) refreshCmd() tea.Cmd {
 		return nil
 	}
 	m.inFlight = true
-	return discoverCmd(m.deps.Disc, m.tickID, false)
+	return discoverCmd(m.deps.Disc, m.tickID, false, m.historyDays)
 }
 
 // enterKey attaches to or resumes the selected session.

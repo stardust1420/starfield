@@ -94,7 +94,8 @@ type clearStatusMsg struct {
 	seq    int
 }
 
-const statusClearDelay = 4 * time.Second
+// statusClearDelay is how long a success stays; a var so tests can shorten it.
+var statusClearDelay = 4 * time.Second
 
 func (s statusLine) render() string {
 	switch {

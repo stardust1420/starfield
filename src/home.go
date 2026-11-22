@@ -44,14 +44,14 @@ type discoveredMsg struct {
 var discoverMu sync.Mutex
 
 // discoverCmd runs a discovery off the UI goroutine.
-func discoverCmd(d *sessions.Discoverer, id int, fromTick bool) tea.Cmd {
+func discoverCmd(d *sessions.Discoverer, id int, fromTick bool, days int) tea.Cmd {
 	return func() tea.Msg {
 		if d == nil {
 			return discoveredMsg{id: id, fromTick: fromTick}
 		}
 		discoverMu.Lock()
 		defer discoverMu.Unlock()
-		ss, err := d.Discover()
+		ss, err := d.DiscoverWithin(days)
 		return discoveredMsg{id: id, sessions: ss, err: err, fromTick: fromTick}
 	}
 }
@@ -85,6 +85,7 @@ type homeModel struct {
 	confirm     *confirmPrompt // pending stop (Task 8), if any
 	filter      filterBar
 	runningOnly bool
+	historyDays int        // window for stopped sessions (t cycles it); 0 is all time
 	stars       *starfield // the empty-state sky; nil until the size is known
 
 	previewOpen    bool   // the p panel is shown
@@ -106,6 +107,8 @@ func InitHomeModel(d Deps, width, height int) homeModel {
 		tickID: newTickID(),
 		filter: newFilterBar(),
 		stars:  newHomeStarfield(width, height),
+
+		historyDays: d.Cfg.HistoryDays,
 	}
 	if d.Tmux != nil {
 		m.ops = d.Tmux
@@ -162,7 +165,7 @@ func (m homeModel) selected() *sessions.Session {
 // rebuild fills the grid from the last discovery with the current view and
 // filter. The grid keeps the cursor on the same session across rebuilds.
 func (m *homeModel) rebuild() {
-	m.shown = filterSessions(m.all, m.runningOnly, m.filter.query())
+	m.shown = filterSessions(withinWindow(m.all, m.historyDays, time.Now()), m.runningOnly, m.filter.query())
 	m.hasBusy = false
 	for _, s := range m.shown {
 		if s.State == sessions.Running && s.Status == "busy" {
@@ -222,7 +225,13 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, scheduleTick(m.tickID)
 		}
 		m.inFlight = true
-		return m, discoverCmd(m.deps.Disc, m.tickID, true)
+		return m, discoverCmd(m.deps.Disc, m.tickID, true, m.historyDays)
+
+	case settingsSavedMsg:
+		if msg.err != nil {
+			return m, m.setStatus(statusError, "couldn't save settings: "+msg.err.Error())
+		}
+		return m, nil
 
 	case discoveredMsg:
 		if msg.id != m.tickID {
@@ -340,6 +349,8 @@ func (m homeModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.RunningOnly):
 		m.runningOnly = !m.runningOnly
 		m.rebuild()
+	case key.Matches(msg, m.keys.History):
+		return m.cycleHistory()
 	case msg.String() == "esc":
 		if m.filter.query() != "" {
 			m.filter.clear()
@@ -373,11 +384,18 @@ func (m homeModel) View() string {
 	}
 
 	w := pageWidth(m.width)
-	header := renderHeader(w, sessionCounts(m.all, m.runningOnly), withFilterCrumb(m.filter)...)
+	counts := sessionCounts(withinWindow(m.all, m.historyDays, time.Now()), m.runningOnly) +
+		"  " + historyTag(m.historyDays)
+	header := renderHeader(w, counts, withFilterCrumb(m.filter)...)
 
-	empty := "No sessions match " + m.filter.crumb()
-	if m.filter.query() == "" {
+	var empty string
+	switch {
+	case m.filter.query() != "":
+		empty = "No sessions match " + m.filter.crumb()
+	case m.runningOnly:
 		empty = "Nothing running · a to show all"
+	default: // every stopped session is older than the window
+		empty = "No sessions " + historyPhrase(m.historyDays) + " · t to look further back"
 	}
 	panel := ""
 	if m.confirm != nil {
@@ -399,6 +417,10 @@ func (m homeModel) emptyView() string {
 	text := mutedStyle.Render("scanning sessions…")
 	if m.loaded {
 		text = mutedStyle.Render("No Claude sessions yet — press ") + crumbStyle.Render("n") + mutedStyle.Render(" to start one")
+		if m.historyDays > 0 {
+			text = mutedStyle.Render("No sessions "+historyPhrase(m.historyDays)+" — ") + crumbStyle.Render("t") +
+				mutedStyle.Render(" to look further back, ") + crumbStyle.Render("n") + mutedStyle.Render(" to start one")
+		}
 	}
 	lines := []string{brandStyle.Render("✦ starfield"), "", text, ""}
 	if st := m.status.render(); st != "" {

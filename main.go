@@ -40,7 +40,8 @@ Flags:
 
 Environment:
   STARFIELD_ROOTS=~/Developer   Colon-separated directories scanned for projects
-  STARFIELD_HISTORY_DAYS=14     How many days of stopped sessions to list
+  STARFIELD_HISTORY_DAYS=14     Starting window for stopped sessions, in days
+                                (t in the app changes it and remembers it)
   STARFIELD_DETACH_KEY=C-]      Key (tmux syntax) that returns to the home screen
   STARFIELD_CLAUDE_CMD="caffeinate -is claude"
                                 Command that launches Claude (split on spaces;
@@ -77,6 +78,12 @@ func main() {
 		os.Exit(1)
 	}
 	cfg := config.Load(os.Getenv, home)
+	// Choices made in the app (t: history window) win over the environment.
+	// An unreadable settings file just means the defaults; the next change
+	// rewrites it.
+	if saved, err := config.LoadSettings(cfg.StateDir); err == nil {
+		cfg = cfg.Apply(saved)
+	}
 	tm, err := tmux.New(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "starfield: %v\n", err)

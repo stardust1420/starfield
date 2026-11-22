@@ -289,3 +289,27 @@ func TestMergePaneFallsBackToPIDThenDepth(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoverWithinUsesTheGivenWindow(t *testing.T) {
+	var since time.Time
+	d := NewDiscoverer(config.Config{ClaudeDir: "/nonexistent", HistoryDays: 14}, nil)
+	d.scanHistory = func(_ string, s time.Time, _ *claude.HistoryCache) ([]claude.HistorySession, error) {
+		since = s
+		return nil, nil
+	}
+	d.snapshot = func() (procs.Table, error) { return testTable(), nil }
+	d.readRegistry = func(string, procs.Table) ([]claude.LiveSession, error) { return nil, nil }
+
+	d.DiscoverWithin(3)
+	if ago := time.Since(since); ago < 71*time.Hour || ago > 73*time.Hour {
+		t.Errorf("3 days: since is %v ago", ago)
+	}
+	d.DiscoverWithin(0)
+	if !since.IsZero() {
+		t.Errorf("0 (all time): since = %v; want zero", since)
+	}
+	d.Discover()
+	if ago := time.Since(since); ago < 13*24*time.Hour || ago > 15*24*time.Hour {
+		t.Errorf("Discover should use cfg.HistoryDays (14): since is %v ago", ago)
+	}
+}

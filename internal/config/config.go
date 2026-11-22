@@ -11,7 +11,7 @@ import (
 // Config is starfield's runtime configuration.
 type Config struct {
 	Roots         []string // directories scanned for projects (STARFIELD_ROOTS)
-	HistoryDays   int      // how far back to list stopped sessions
+	HistoryDays   int      // how far back to list stopped sessions, in days; 0 is all time
 	DetachKey     string   // tmux key syntax, e.g. "C-]"
 	ClaudeCmd     []string // command that launches Claude
 	ReducedMotion bool     // freeze the starfield animation

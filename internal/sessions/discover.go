@@ -39,16 +39,27 @@ func NewDiscoverer(cfg config.Config, tm *tmux.Client) *Discoverer {
 	return d
 }
 
-// Discover never fails as a whole: if a source errors, the others are still
-// merged and the first error is returned alongside the sessions.
+// Discover lists stopped sessions from the configured window
+// (cfg.HistoryDays); see DiscoverWithin.
 func (d *Discoverer) Discover() ([]Session, error) {
+	return d.DiscoverWithin(d.cfg.HistoryDays)
+}
+
+// DiscoverWithin never fails as a whole: if a source errors, the others are
+// still merged and the first error is returned alongside the sessions.
+// Stopped sessions are listed if active in the last days days; 0 means all
+// of them. Running sessions are listed whatever their age.
+func (d *Discoverer) DiscoverWithin(days int) ([]Session, error) {
 	var first error
 	note := func(err error) {
 		if err != nil && first == nil {
 			first = err
 		}
 	}
-	since := time.Now().AddDate(0, 0, -d.cfg.HistoryDays)
+	var since time.Time // zero: everything
+	if days > 0 {
+		since = time.Now().AddDate(0, 0, -days)
+	}
 	hist, err := d.scanHistory(filepath.Join(d.cfg.ClaudeDir, "projects"), since, d.cache)
 	note(err)
 	table, err := d.snapshot()

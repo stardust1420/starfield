@@ -102,6 +102,7 @@ type homeKeyMap struct {
 	Move        key.Binding // short form of keyMap.Up
 	HelpShort   key.Binding // short form of keyMap.Help
 	RunningOnly key.Binding
+	History     key.Binding
 	New         key.Binding
 	Preview     key.Binding
 	actions     []key.Binding
@@ -112,6 +113,7 @@ var homeKeys = homeKeyMap{
 	Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
 	HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+	History:     key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "history window")),
 	New:         key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new")),
 	Preview:     key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "preview")),
 	actions: []key.Binding{
@@ -130,7 +132,7 @@ func (k homeKeyMap) ShortHelp() []key.Binding {
 func (k homeKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down},
-		append(append([]key.Binding{k.actions[0], k.New}, k.actions[1:]...), k.Preview, k.RunningOnly),
+		append(append([]key.Binding{k.actions[0], k.New}, k.actions[1:]...), k.Preview, k.RunningOnly, k.History),
 		{filterKey, k.Help, quitKey},
 	}
 }

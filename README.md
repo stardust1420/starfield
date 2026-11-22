@@ -43,6 +43,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 | `x` | stop the selected managed session (asks first) |
 | `p` | toggle the live preview panel (pane contents, or last prompt for stopped/external sessions) |
 | `a` | toggle all sessions / running only |
+| `t` | history window for stopped sessions: 1d → 3d → 7d → 14d → 30d → 90d → all time (shown as `◷ 14d` in the header; remembered across launches) |
 | `/` | filter |
 | `esc` | clear the filter |
 | `?` | toggle the full help |
@@ -64,7 +65,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `STARFIELD_ROOTS` | `~/Developer` | colon-separated directories scanned for repos (depth 2) in the picker; new directories made from a plain name go in the first one |
-| `STARFIELD_HISTORY_DAYS` | `14` | how many days of stopped sessions to list |
+| `STARFIELD_HISTORY_DAYS` | `14` | starting window for stopped sessions, in days; once you pick one with `t` it is saved to `~/.config/starfield/settings.json` and used instead |
 | `STARFIELD_DETACH_KEY` | `C-]` | key that returns to the home screen; a plain tmux key name such as `C-]` or `C-q`. A changed key takes effect once the private tmux server restarts: when no starfield sessions are running, or after `tmux -L starfield kill-server` |
 | `STARFIELD_CLAUDE_CMD` | `caffeinate -is claude` on macOS, `claude` elsewhere | command that launches Claude, split on whitespace |
 | `STARFIELD_REDUCED_MOTION` | unset | `1` keeps the starfield and busy glyph still |
