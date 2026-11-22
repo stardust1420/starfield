@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Starfield is a Go terminal UI (Bubble Tea + Bubbles + Lip Gloss) that manages Claude Code sessions through tmux. Module path: `github.com/stardust1420/starfield` (Go 1.24). Platforms: darwin and linux.
+Starfield is a Go terminal UI (Bubble Tea + Bubbles + Lip Gloss) that manages Claude Code sessions through tmux: every session in every directory as a card (running, external, stopped), attach/resume/stop, a new-session directory picker and a live pane preview. Module path: `github.com/stardust1420/starfield` (Go 1.24). Platforms: darwin and linux. The UI kit in `src/` was copied from the sibling project stardocker and stripped of Docker code.
 
 ## Commands
 
@@ -12,26 +12,47 @@ Starfield is a Go terminal UI (Bubble Tea + Bubbles + Lip Gloss) that manages Cl
 go build .        # produces ./starfield (gitignored); --version / --help
 go run .          # needs tmux on the PATH
 go vet ./...
-gofmt -l .
+gofmt -l .        # prints nothing when clean
 go test ./...     # one test: go test ./src/... -run TestName
 ```
 
-The TUI needs a real TTY, so Claude can't drive it. Check changes with build + vet + test, then have the user run `! go run .`. `go mod tidy` and git writes fail inside the Bash sandbox; run them with the sandbox disabled.
+Unit tests cover the pure helpers and the screens driven with a fake `sessionOps`; `internal/tmux/integration_test.go` talks to a real tmux. The TUI needs a real TTY, so Claude can't drive it. Check changes with build + vet + test, then have the user run `! go run .`.
+
+Sandbox notes: git writes (`git add`, `git commit`), `go mod tidy` and anything that talks to a tmux socket fail inside the Bash sandbox; run them with the sandbox disabled.
+
+To see a screen without a TTY, add a temporary `src/zz_*_tmp_test.go` that builds the model (`InitHomeModel(Deps{Cfg: testCfg()}, w, h)`, fake `ops`), sends it `discoveredMsg` / `tea.KeyMsg`s, runs any returned `tea.Cmd` and feeds the result back, then prints `ansi.Strip(m.View())`. Delete it afterwards.
 
 ## Architecture
 
-- `main.go` parses `-v/--version` and `-h/--help`, checks that `tmux` is on the PATH, loads `config.Load(os.Getenv, home)` and starts `src.InitHomeModel(deps, 0, 0)`. `src.Deps` carries everything the screens need.
-- `internal/config`: env-driven `Config` (`STARFIELD_ROOTS`, `STARFIELD_HISTORY_DAYS`, `STARFIELD_DETACH_KEY`, `STARFIELD_CLAUDE_CMD`, `STARFIELD_REDUCED_MOTION`).
-- `src/` is the UI kit, copied from the sibling project stardocker and stripped of Docker code. Screens are independent `tea.Model`s; navigation works by returning a different model from `Update`.
-  - `layout.go`: palette (`colorAccent` is Claude coral `#d97757`, green is running, steel `#7aa2f7` is external, grey is stopped), glyph constants (`glyphRunning` ●, `glyphBusy` ◐, `glyphExternal` ◌, `glyphStopped` ○, `glyphStarting` ◔), `renderHeader`, `renderPanelColored`, `renderBottomBar`.
-  - `cards.go`: `gridView`, the card grid with selection, scrolling and `setEntries`. Card lines are pre-styled and truncated with `ansiTruncate`.
-  - `starfield.go`: animated sky for the empty/home state; `STARFIELD_REDUCED_MOTION=1` freezes it.
-  - `input.go`: `textField`, `filterBar`, `matches`. `confirm.go`: `confirmPrompt`, `statusLine`. `help.go`: `newHelp`, shared `keyMap`, `listKeyMap`.
-  - `tick.go`: `newTickID`, `tickMsg`, `tickCmd`. Each refreshing model gets its own id and ignores ticks that aren't its own.
-  - `home.go`: `Deps` and the home screen (currently a stub).
-- Models use value receivers, so mutations inside `Init()` are discarded.
-- Every tmux call uses `-L starfield -f <conf>`; never touch the user's default tmux server. Managed session names are `sf-` + the first 8 chars of the Claude session UUID.
+- `main.go` parses `-v/--version` and `-h/--help` (`version` is set by GoReleaser ldflags, else read from build info), exits with `starfield needs tmux: brew install tmux` if tmux isn't on the PATH, loads `config.Load(os.Getenv, home)`, creates the `tmux.Client` and a `sessions.Discoverer`, and starts `src.InitHomeModel(deps, 0, 0)` with the alt screen. `src.Deps{Cfg, Tmux, Disc}` is what every screen needs.
+- `internal/config`: env-driven `Config` (`STARFIELD_ROOTS` colon-separated, default `~/Developer`; `STARFIELD_HISTORY_DAYS` 14; `STARFIELD_DETACH_KEY` `C-]`; `STARFIELD_CLAUDE_CMD` split on whitespace, default `caffeinate -is claude`; `STARFIELD_REDUCED_MOTION`). Bad values fall back to defaults. `ClaudeDir` is `~/.claude`, `StateDir` is `~/.config/starfield`.
+- `internal/claude`: `ParseSessionFile` / `ScanHistory` read the transcripts under `~/.claude/projects` (with a `HistoryCache`) into `HistorySession`s; `ReadRegistry` reads the live-session registry under `~/.claude/sessions`, keeping only entries whose PID is alive and is Claude.
+- `internal/procs`: process table from `ps -axo pid=,ppid=,comm=` (`IsAncestor`, `IsClaude`).
+- `internal/tmux`: `Client` runs every command as `tmux -L starfield -f <conf>`; never touch the user's default tmux server. `New` writes `RenderConf(detachKey)` (extended keys for shift+enter, mouse on, no prefix, a root-table detach binding, themed status bar) to `StateDir/tmux.conf`; the server only reads it when it starts, so a changed detach key needs the server restarted. `NewSession` runs argv directly (no shell) in a detached session and tags it with `@sf_session` (full Claude UUID) and `@sf_dir`; `List` returns `Pane`s; `AttachCmd` (strips `TMUX` from the env); `Kill`; `Capture(name, lines)` is `capture-pane -p -e`. Managed session names are `sf-` + the first 8 chars of the Claude UUID (`SessionName`).
+- `internal/dirs`: `Scan` finds git repos (and direct children of a root) to depth 2; `Candidates` lists recent session dirs then scanned ones; `Fuzzy` is the hand-written matcher.
+- `internal/sessions`: `Merge` combines history, the live registry and tmux panes into `Session`s with a `State` (`Running`, `Starting`, `External`, `Stopped`, sorted in that order, then by `LastActive`). A live entry is Running when a tmux pane is, or is an ancestor of, its process, else External; leftover panes are Starting; the rest of the history is Stopped. `Discoverer.Discover` gathers all sources and returns the first error with whatever it found; it isn't safe for concurrent use (see `discoverMu` in `home.go`).
+- `src/` screens are independent `tea.Model`s; navigation works by returning a different model from `Update` (home returns the picker, the picker returns the home screen it came from via `resume`).
+  - `home.go`: `Deps`, `homeModel` (the card grid of sessions) and its key handling. Refreshes on a tick loop with one discovery in flight (`discoverCmd` -> `discoveredMsg`); a frame loop (`frameMsg`) drives the busy glyph and the starfield while there are no sessions. `a` toggles running-only, `/` filters, `esc` clears the filter. `resume(width, height)` gives the model a new tick id and restarts its loops after returning from an attach or the picker.
+  - `home_cards.go`: `buildSessionEntries` makes one heading per directory and one card per session (title, model, last prompt, message count, cost, state line); `filterSessions`, `sessionCounts`, `relTime`.
+  - `actions.go`: `sessionOps` (the part of `*tmux.Client` the actions use: `AttachCmd`, `NewSession`, `Kill`, `Capture`; tests use a fake). `enterKey` attaches a managed session, resumes a stopped one (`claude --resume <id>` in a new tmux session, guarded by `starting` against double enter) and refuses External with a status message. `startIn` starts `claude --session-id <uuid>` in a directory. `stopKey` opens the `x` confirmation. Attaching uses `tea.ExecProcess`, and `attachDoneMsg` triggers a refresh.
+  - `picker.go`: the new-session picker, a fuzzy-filtered list of recent dirs and repos under the roots; a typed path is offered as is; `tab` completes, `enter` starts and attaches, `esc` goes back.
+  - `preview.go`: the `p` panel (`previewLines` = 12 tall, borders included). For a Running or Starting selection `previewCmd` runs `Capture` in a `tea.Cmd` (on opening, on selection change and each discovery tick) and `previewMsg{name, content, err}` is dropped unless `name` is still the selected tmux session; errors show inside the panel as `preview unavailable: ...`. For External and Stopped sessions it shows the full last prompt, wrapped and ANSI-free. `previewPanel` keeps the last lines that fit, truncates each with `ansiTruncate` and ends each with an ANSI reset so an unterminated sequence can't colour the UI. `layout()` shrinks the grid by the panel (`listGridHeightWith`).
+  - `cards.go`: `gridView`, the card grid with selection, scrolling and `setEntries` (keeps the cursor on the same entry key across refreshes); `listGridHeight(With)` and `renderGridPage` are the page layout. Card lines are pre-styled and truncated with `ansiTruncate`.
+  - `layout.go`: the palette (`colorAccent` Claude coral `#d97757`, green running, steel `#7aa2f7` external, grey stopped), glyphs (`glyphRunning` ●, `glyphBusy` ◐ pulsing ◐◓◑◒, `glyphExternal` ◌, `glyphStopped` ○, `glyphStarting` ◔), `renderHeader`, `renderPanelColored`, `renderBottomBar`.
+  - `starfield.go`: the animated sky behind the empty home screen; `STARFIELD_REDUCED_MOTION=1` freezes it.
+  - `input.go`: `textField`, `filterBar`. `confirm.go`: `confirmPrompt`, `statusLine` (bottom-right message), `actionMsg`. `help.go`: `newHelp`, the shared `keyMap`, `listKeyMap`, and `homeKeyMap` (short help is compact so a status fits beside it; `p preview` is in the full help only).
+  - `tick.go`: `newTickID`, `tickMsg`, `tickCmd` (2 s `refreshInterval`).
+- **Refresh loop:** each refreshing model gets an id from `newTickID()`, starts its loop from `Init()` and ignores any `tickMsg` / `discoveredMsg` / `frameMsg` whose id isn't its own, so a tick from a replaced screen dies instead of stacking a second loop.
+- **Window size:** Bubble Tea sends `tea.WindowSizeMsg` only at startup and on resize, so screens built later take `width, height` from the screen they came from.
+- **Cards vs. data:** card text is display-only. `items` is parallel to `grid.entries` (nil for a heading) and actions use `selected()`. Keep the two slices in step if you change how entries are built.
+- Models use value receivers, so mutations inside `Init()` are discarded. The home screen fills on an immediate first tick fired from `Init()`.
+- Anything slow (discovery, tmux calls, capture) runs in a `tea.Cmd`, never in `Update` or `View`. Errors show in the status line (or inside the preview panel).
+- Every tmux call uses `-L starfield -f <conf>`; never touch the user's default tmux server.
 
 ## Releasing
 
-CI (`.github/workflows/ci.yml`) runs gofmt, vet, build and test. Pushing a `v*` tag runs GoReleaser (`.goreleaser.yaml`) for linux/darwin x amd64/arm64.
+CI (`.github/workflows/ci.yml`) runs gofmt, vet, build and test. Pushing a `v*` tag runs GoReleaser (`.goreleaser.yaml`) for linux/darwin x amd64/arm64; archives include `LICENSE` and `README.md`.
+
+## Keybindings
+
+See the README for the tables. Home: arrows/hjkl move, `enter` attach/resume, `n` new, `x` stop, `p` preview, `a` all/running, `/` filter, `esc`, `?`, `q`. Picker: type to filter, `↑↓`, `tab`, `enter`, `esc`.
