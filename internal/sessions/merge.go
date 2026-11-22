@@ -1,5 +1,13 @@
 // Package sessions combines Claude history, the live registry and tmux panes
 // into the single session list the home screen renders.
+//
+// Merge rules: each live registry entry becomes one session keyed by its
+// SessionID (Running when a tmux pane is, or is an ancestor of, its process,
+// else External); if several entries share an ID, the managed one wins, else
+// the newest StartedAt. Panes left over become Starting, and the remaining
+// history entries become Stopped. Sorting is by state, then LastActive
+// descending, then ID. Dir falls back history, live, pane; Title falls back
+// history title, registry name, last prompt.
 package sessions
 
 import (
@@ -32,7 +40,7 @@ type Session struct {
 	PID                                                         int // live PID for Running/External, else 0
 }
 
-// Merge combines the three sources. See the package docs for the rules.
+// Merge combines the three sources using the rules in the package comment.
 func Merge(hist []claude.HistorySession, live []claude.LiveSession, panes []tmux.Pane, table procs.Table) []Session {
 	histByID := make(map[string]claude.HistorySession, len(hist))
 	for _, h := range hist {
@@ -42,7 +50,7 @@ func Merge(hist []claude.HistorySession, live []claude.LiveSession, panes []tmux
 	paneUsed := make([]bool, len(panes))
 	var out []Session
 
-	for _, l := range live {
+	for _, l := range pickLive(live, panes, table) {
 		s := fromHistory(histByID[l.SessionID], l.SessionID)
 		s.State = External
 		s.PID = l.PID
@@ -64,10 +72,13 @@ func Merge(hist []claude.HistorySession, live []claude.LiveSession, panes []tmux
 			if paneUsed[i] {
 				continue
 			}
-			if p.PanePID == l.PID || table.IsAncestor(p.PanePID, l.PID) {
+			if managedBy(p, l, table) {
 				paneUsed[i] = true
 				s.State = Running
 				s.TmuxName = p.Session
+				if s.Dir == "" {
+					s.Dir = p.Dir
+				}
 				break
 			}
 		}
@@ -134,4 +145,37 @@ func firstNonEmpty(a, b string) string {
 		return a
 	}
 	return b
+}
+
+func managedBy(p tmux.Pane, l claude.LiveSession, table procs.Table) bool {
+	return p.PanePID == l.PID || table.IsAncestor(p.PanePID, l.PID)
+}
+
+// pickLive keeps one live entry per SessionID, preferring one managed by a
+// pane, then the newest StartedAt. Order of first appearance is preserved.
+func pickLive(live []claude.LiveSession, panes []tmux.Pane, table procs.Table) []claude.LiveSession {
+	managed := func(l claude.LiveSession) bool {
+		for _, p := range panes {
+			if managedBy(p, l, table) {
+				return true
+			}
+		}
+		return false
+	}
+	idx := map[string]int{}
+	var out []claude.LiveSession
+	for _, l := range live {
+		i, seen := idx[l.SessionID]
+		if !seen {
+			idx[l.SessionID] = len(out)
+			out = append(out, l)
+			continue
+		}
+		cur := out[i]
+		cm, lm := managed(cur), managed(l)
+		if (lm && !cm) || (lm == cm && l.StartedAt.After(cur.StartedAt)) {
+			out[i] = l
+		}
+	}
+	return out
 }

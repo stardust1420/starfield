@@ -168,3 +168,34 @@ func TestDiscoverReturnsPartialResultsOnSourceError(t *testing.T) {
 		t.Fatalf("x %+v", x)
 	}
 }
+
+func TestMergeLiveDirFallsBackToPaneDir(t *testing.T) {
+	live := []claude.LiveSession{{PID: 12, SessionID: "a", StartedAt: t0}}
+	panes := []tmux.Pane{{Session: "sf-a", PanePID: 10, ClaudeID: "a", Dir: "/p"}}
+	got := Merge(nil, live, panes, testTable())
+	if len(got) != 1 || got[0].Dir != "/p" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestMergeDedupesLiveSessionsWithSameID(t *testing.T) {
+	// Managed entry wins even when older.
+	live := []claude.LiveSession{
+		{PID: 20, SessionID: "a", StartedAt: t0.Add(time.Hour)},
+		{PID: 12, SessionID: "a", StartedAt: t0},
+	}
+	panes := []tmux.Pane{{Session: "sf-a", PanePID: 10, ClaudeID: "a"}}
+	got := Merge(nil, live, panes, testTable())
+	if len(got) != 1 || got[0].State != Running || got[0].PID != 12 {
+		t.Fatalf("managed preference: %+v", got)
+	}
+	// Neither managed: newest StartedAt wins.
+	live = []claude.LiveSession{
+		{PID: 20, SessionID: "a", StartedAt: t0},
+		{PID: 21, SessionID: "a", StartedAt: t0.Add(time.Hour)},
+	}
+	got = Merge(nil, live, nil, testTable())
+	if len(got) != 1 || got[0].PID != 21 || got[0].State != External {
+		t.Fatalf("newest preference: %+v", got)
+	}
+}
