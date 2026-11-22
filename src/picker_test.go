@@ -3,6 +3,8 @@ package src
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -88,9 +90,14 @@ func TestPickerFiltersAsYouType(t *testing.T) {
 		t.Fatalf("empty query rows = %v; want all 4", rowPaths(p))
 	}
 	p = typeInto(t, p, "co")
-	want := []string{"/w/console", "/w/acme-co"}
+	// The matches, best first, then the offer to create "co" (this config
+	// has no roots, so under the directory starfield was launched from).
+	want := []string{"/w/console", "/w/acme-co", filepath.Join(p.cwd, "co")}
 	if got := rowPaths(p); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("rows = %v; want %v", got, want)
+	}
+	if !p.rows[2].create {
+		t.Errorf("last row should offer to create: %+v", p.rows[2])
 	}
 	if p.cursor != 0 {
 		t.Errorf("cursor = %d; want 0", p.cursor)
@@ -142,21 +149,139 @@ func TestPickerTypedPathRowPinned(t *testing.T) {
 	}
 }
 
-func TestPickerTypedMissingPathShowsError(t *testing.T) {
+func TestPickerTypedFileShowsError(t *testing.T) {
 	f := &fakeOps{}
+	file := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	p := testPicker(t, f, dirs.Candidate{Path: "/w/alpha", Source: dirs.Recent})
-	p = typeInto(t, p, "/nope/zzz")
+	p = typeInto(t, p, file)
+	if !p.rows[0].bad || p.rows[0].create {
+		t.Fatalf("row = %+v; want bad, not create", p.rows[0])
+	}
 	next, cmd := p.Update(pickerKey("enter"))
 	p, ok := next.(pickerModel)
 	if !ok {
-		t.Fatalf("enter on a missing dir left the picker (%T)", next)
+		t.Fatalf("enter on a file left the picker (%T)", next)
 	}
 	runAll(cmd)
 	if len(f.names) != 0 {
 		t.Errorf("NewSession called: %v", f.names)
 	}
-	if v := plain(p.View()); !strings.Contains(v, "not a directory") {
-		t.Errorf("view lacks error:\n%s", v)
+	if v := plain(p.View()); !strings.Contains(v, "not a directory:") {
+		t.Errorf("view lacks the enter error:\n%s", v)
+	}
+}
+
+func TestPickerTypedNewPathOffersCreate(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "brand", "new")
+	p := testPicker(t, &fakeOps{}, dirs.Candidate{Path: "/w/alpha", Source: dirs.Recent})
+	p = typeInto(t, p, dir)
+	r := p.rows[0]
+	if r.cand.Path != dir || !r.create || r.bad {
+		t.Fatalf("row = %+v; want create row for %s", r, dir)
+	}
+	v := plain(p.View())
+	if !strings.Contains(v, "will be created") || !strings.Contains(v, "+ new") {
+		t.Errorf("view doesn't offer to create:\n%s", v)
+	}
+	if !strings.Contains(v, "enter create & start") {
+		t.Errorf("hint doesn't say enter creates:\n%s", v)
+	}
+}
+
+// startedFrom runs a picker enter and returns home and the startedMsg.
+func startedFrom(t *testing.T, p pickerModel) (homeModel, startedMsg, []tea.Msg) {
+	t.Helper()
+	next, cmd := p.Update(pickerKey("enter"))
+	home, ok := next.(homeModel)
+	if !ok {
+		t.Fatalf("enter returned %T; want homeModel", next)
+	}
+	msgs := runAll(cmd)
+	for _, msg := range msgs {
+		if s, ok := msg.(startedMsg); ok {
+			return home, s, msgs
+		}
+	}
+	t.Fatalf("no startedMsg in %#v", msgs)
+	return home, startedMsg{}, nil
+}
+
+func TestPickerEnterCreatesDirAndStarts(t *testing.T) {
+	f := &fakeOps{}
+	dir := filepath.Join(t.TempDir(), "brand", "new")
+	p := typeInto(t, testPicker(t, f), dir)
+	home, started, _ := startedFrom(t, p)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		t.Fatalf("directory not created: %v", err)
+	}
+	if len(f.dirs) != 1 || f.dirs[0] != dir {
+		t.Errorf("NewSession dirs = %v; want [%s]", f.dirs, dir)
+	}
+	if !home.starting[started.name] {
+		t.Errorf("starting %v lacks %s", home.starting, started.name)
+	}
+}
+
+func TestPickerCreateFailureIsReported(t *testing.T) {
+	f := &fakeOps{}
+	parent := filepath.Join(t.TempDir(), "locked")
+	if err := os.Mkdir(parent, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(parent, 0o700) })
+	dir := filepath.Join(parent, "new")
+	p := typeInto(t, testPicker(t, f), dir)
+	next, cmd := p.Update(pickerKey("enter"))
+	var failed *startFailedMsg
+	for _, msg := range runAll(cmd) {
+		if s, ok := msg.(startFailedMsg); ok {
+			failed = &s
+		}
+	}
+	if failed == nil || !strings.Contains(failed.err.Error(), "create "+dir) {
+		t.Fatalf("want startFailedMsg naming the dir, got %#v", failed)
+	}
+	if len(f.names) != 0 {
+		t.Errorf("NewSession called after mkdir failed: %v", f.names)
+	}
+	_ = next
+}
+
+func TestPickerPlainNameOffersNewUnderFirstRoot(t *testing.T) {
+	root := t.TempDir()
+	back := InitHomeModel(Deps{Cfg: testCfg()}, 100, 30)
+	back.deps.Cfg.Roots = []string{root, "/elsewhere"}
+	back.ops = &fakeOps{}
+	p := initPickerModel(back, []dirs.Candidate{{Path: "/w/myproject-api", Source: dirs.Recent}}, 100, 30)
+	p = typeInto(t, p, "myproj")
+	last := p.rows[len(p.rows)-1]
+	if last.cand.Path != filepath.Join(root, "myproj") || !last.create {
+		t.Fatalf("last row = %+v; want create %s/myproj", last, root)
+	}
+	if p.rows[0].cand.Path != "/w/myproject-api" {
+		t.Errorf("fuzzy match should stay first: %+v", p.rows[0])
+	}
+
+	// A name that already exists under the root is offered as is.
+	if err := os.Mkdir(filepath.Join(root, "made"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p = typeInto(t, initPickerModel(back, nil, 100, 30), "made")
+	if r := p.rows[len(p.rows)-1]; r.cand.Path != filepath.Join(root, "made") || r.create || r.bad {
+		t.Errorf("existing dir row = %+v; want plain path row", r)
+	}
+
+	// Names that aren't a single path element get no create row.
+	for _, q := range []string{"..", "a b/c"} {
+		p = typeInto(t, initPickerModel(back, nil, 100, 30), q)
+		for _, r := range p.rows {
+			if r.create {
+				t.Errorf("query %q offered to create %s", q, r.cand.Path)
+			}
+		}
 	}
 }
 

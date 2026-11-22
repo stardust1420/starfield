@@ -1,7 +1,9 @@
 package src
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,12 +53,14 @@ type scannedMsg struct {
 
 // pickerRow is one result: a candidate, its path as shown (~ for home),
 // the byte offsets of the query's matched characters in that string, and,
-// for a typed path, whether it isn't an existing directory.
+// for a typed path or a new name, whether it exists but isn't a directory
+// (bad) or doesn't exist yet and enter will create it (create).
 type pickerRow struct {
-	cand dirs.Candidate
-	disp string
-	pos  []int
-	bad  bool
+	cand   dirs.Candidate
+	disp   string
+	pos    []int
+	bad    bool
+	create bool
 }
 
 type pickerModel struct {
@@ -160,12 +164,7 @@ func (m pickerModel) buildRows() []pickerRow {
 	typed := ""
 	if isPathQuery(q) {
 		typed = m.typedPath(q)
-		fi, err := os.Stat(typed)
-		rows = append(rows, pickerRow{
-			cand: dirs.Candidate{Path: typed, Source: dirs.Typed},
-			disp: tildePath(typed, m.home),
-			bad:  err != nil || !fi.IsDir(),
-		})
+		rows = append(rows, m.pathRow(typed))
 	}
 	disp := make([]string, len(m.cands))
 	for i, c := range m.cands {
@@ -178,7 +177,48 @@ func (m pickerModel) buildRows() []pickerRow {
 		}
 		rows = append(rows, pickerRow{cand: c, disp: disp[mt.Index], pos: mt.Positions})
 	}
+	// A plain name is also offered as a directory under the first root,
+	// after the matches, so `myproj` + enter makes ~/Developer/myproj.
+	if !isPathQuery(q) && isDirName(q) {
+		p := filepath.Join(m.newRoot(), q)
+		listed := false
+		for _, r := range rows {
+			listed = listed || r.cand.Path == p
+		}
+		if r := m.pathRow(p); !listed && !r.bad {
+			rows = append(rows, r)
+		}
+	}
 	return rows
+}
+
+// pathRow is the row for a path the user named rather than picked: an
+// existing directory, one enter will create (it doesn't exist yet), or bad
+// (it exists but isn't a directory, or can't be checked).
+func (m pickerModel) pathRow(p string) pickerRow {
+	r := pickerRow{cand: dirs.Candidate{Path: p, Source: dirs.Typed}, disp: tildePath(p, m.home)}
+	fi, err := os.Stat(p)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		r.create = true
+	case err != nil || !fi.IsDir():
+		r.bad = true
+	}
+	return r
+}
+
+// isDirName reports whether q can be used as one new directory name.
+func isDirName(q string) bool {
+	return q != "" && q != "." && q != ".." && !strings.ContainsAny(q, "/\x00")
+}
+
+// newRoot is where a plain name is created: the first configured root, or
+// the directory starfield was launched from when there is none.
+func (m pickerModel) newRoot() string {
+	if roots := m.back.deps.Cfg.Roots; len(roots) > 0 {
+		return roots[0]
+	}
+	return m.cwd
 }
 
 // listRows is how many result rows fit: height-8, at least one.
@@ -296,7 +336,12 @@ func (m pickerModel) start() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	h := m.back.resume(m.width, m.height)
-	h, cmd := h.startIn(r.cand.Path)
+	var cmd tea.Cmd
+	if r.create {
+		h, cmd = h.createIn(r.cand.Path)
+	} else {
+		h, cmd = h.startIn(r.cand.Path)
+	}
 	return h, tea.Batch(h.Init(), cmd)
 }
 
@@ -317,14 +362,18 @@ func (m pickerModel) View() string {
 
 	n := min(m.listRows(), max(1, len(m.rows)))
 	if len(m.rows) == 0 {
-		lines = append(lines, "  "+mutedStyle.Render("no matches — type a path starting with / or ~"))
+		lines = append(lines, "  "+mutedStyle.Render("no matches — type a name to create it, or a path starting with / or ~"))
 	}
 	for i := m.offset; i < len(m.rows) && i < m.offset+n; i++ {
 		lines = append(lines, m.renderRow(m.rows[i], i == m.cursor, inner))
 	}
 	panel := renderPanelColored(w, "new session", strings.Join(lines, "\n"), 2+n, colorAccent, brandStyle)
 
-	hint := pickerHintStyle.Render("enter start · tab complete · ↑↓ select · esc back")
+	enter := "enter start"
+	if r := m.selected(); r != nil && r.create {
+		enter = "enter create & start"
+	}
+	hint := pickerHintStyle.Render(enter + " · tab complete · ↑↓ select · esc back")
 	if m.err != "" {
 		hint = pickerErrorStyle.Render(m.err)
 	}
@@ -362,9 +411,14 @@ func (m pickerModel) renderRow(r pickerRow, sel bool, width int) string {
 	default:
 		badge = runningStyle.Render("↳ path  ")
 	}
+	if r.create {
+		badge = statusAccentStyle.Render("+ new   ")
+	}
 
 	right := ""
 	switch {
+	case r.create:
+		right = mutedStyle.Render("will be created")
 	case r.bad:
 		right = pickerErrorStyle.Render("✗ not a directory")
 	case r.cand.Source == dirs.Recent && !r.cand.LastUsed.IsZero():

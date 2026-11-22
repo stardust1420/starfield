@@ -52,7 +52,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 
 | Key | Action |
 | --- | --- |
-| typing | fuzzy-filter recent and scanned directories; a path (`/`, `~`, `.`) is offered as typed |
+| typing | fuzzy-filter recent and scanned directories; a path (`/`, `~`, `.`) is offered as typed, and a plain name is offered as a new directory under the first root (`myproj` → `~/Developer/myproj`) |
 | `↑` / `↓` (`ctrl+p` / `ctrl+n`) | select |
 | `pgup` / `pgdn` | page |
 | `tab` | complete the query to the selected path |
@@ -63,7 +63,7 @@ Stopped sessions come from Claude's own history (`~/.claude`); pressing enter on
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `STARFIELD_ROOTS` | `~/Developer` | colon-separated directories scanned for repos (depth 2) in the picker |
+| `STARFIELD_ROOTS` | `~/Developer` | colon-separated directories scanned for repos (depth 2) in the picker; new directories made from a plain name go in the first one |
 | `STARFIELD_HISTORY_DAYS` | `14` | how many days of stopped sessions to list |
 | `STARFIELD_DETACH_KEY` | `C-]` | key that returns to the home screen; a plain tmux key name such as `C-]` or `C-q`. A changed key takes effect once the private tmux server restarts: when no starfield sessions are running, or after `tmux -L starfield kill-server` |
 | `STARFIELD_CLAUDE_CMD` | `caffeinate -is claude` on macOS, `claude` elsewhere | command that launches Claude, split on whitespace |

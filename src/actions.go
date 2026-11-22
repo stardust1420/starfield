@@ -185,6 +185,16 @@ func (m *homeModel) markStarting(name string) {
 // startIn starts a new Claude session in dir (from the picker). The id is
 // made here so the starting guard knows the tmux name before the cmd runs.
 func (m homeModel) startIn(dir string) (homeModel, tea.Cmd) {
+	return m.startNew(dir, false)
+}
+
+// createIn makes dir (and any missing parents) and then starts a new
+// session there, as startIn does.
+func (m homeModel) createIn(dir string) (homeModel, tea.Cmd) {
+	return m.startNew(dir, true)
+}
+
+func (m homeModel) startNew(dir string, create bool) (homeModel, tea.Cmd) {
 	if m.ops == nil {
 		cmd := m.setStatus(statusError, "tmux unavailable")
 		return m, cmd
@@ -192,7 +202,23 @@ func (m homeModel) startIn(dir string) (homeModel, tea.Cmd) {
 	id := newUUID()
 	m.markStarting(tmux.SessionName(id))
 	w, h := m.windowSize()
-	return m, startWithID(m.ops, m.deps.Cfg, dir, id, w, h)
+	start := startWithID(m.ops, m.deps.Cfg, dir, id, w, h)
+	if !create {
+		return m, start
+	}
+	return m, createThenStart(dir, tmux.SessionName(id), start)
+}
+
+// createThenStart runs start once dir exists. mkdir happens in the command,
+// off the UI goroutine; a failure is reported like a failed start, so the
+// starting guard for name is cleared.
+func createThenStart(dir, name string, start tea.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return startFailedMsg{name: name, err: fmt.Errorf("create %s: %w", dir, err)}
+		}
+		return start()
+	}
 }
 
 // stopKey opens the stop confirmation for the selected session.
