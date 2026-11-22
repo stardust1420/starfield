@@ -1,6 +1,7 @@
 package src
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -206,5 +207,31 @@ func TestTildePath(t *testing.T) {
 		if got := tildePath(in, "/home/me"); got != want {
 			t.Errorf("tildePath(%q) = %q; want %q", in, got, want)
 		}
+	}
+}
+
+func TestDiscoveryErrorKeepsPreviousSessions(t *testing.T) {
+	ss := []sessions.Session{{ID: "a", Dir: "/x", Title: "A", State: sessions.Stopped}}
+	m := InitHomeModel(Deps{}, 100, 30)
+	update := func(msg discoveredMsg) {
+		next, _ := m.Update(msg)
+		m = next.(homeModel)
+	}
+	update(discoveredMsg{id: m.tickID, sessions: ss})
+	update(discoveredMsg{id: m.tickID, err: errors.New("tmux broke")})
+
+	if len(m.all) != 1 || m.emptyPage() || m.selected() == nil || m.selected().ID != "a" {
+		t.Fatalf("after a failed discovery: all = %v, empty page = %v; want the previous card kept", m.all, m.emptyPage())
+	}
+	if !strings.Contains(m.status.text, "tmux broke") || m.status.kind != statusError {
+		t.Errorf("status = %q; want the discovery error", m.status.text)
+	}
+	if !strings.Contains(plain(m.View()), "tmux broke") {
+		t.Errorf("view doesn't show the error")
+	}
+
+	update(discoveredMsg{id: m.tickID, sessions: ss})
+	if m.status.text != "" {
+		t.Errorf("status after a clean discovery = %q; want cleared", m.status.text)
 	}
 }

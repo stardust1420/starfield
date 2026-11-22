@@ -205,7 +205,11 @@ func (m homeModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.inFlight = false
 		m.loaded = true
-		m.all = msg.sessions
+		// A failed discovery that found nothing keeps the last list rather
+		// than replacing the cards with the empty state.
+		if msg.err == nil || len(msg.sessions) > 0 {
+			m.all = msg.sessions
+		}
 		var cmd tea.Cmd
 		if msg.err != nil {
 			text := "discovery: " + msg.err.Error()
