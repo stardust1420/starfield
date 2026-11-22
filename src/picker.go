@@ -23,7 +23,7 @@ import (
 // you type. A query that looks like a path (/, ~ or .) also offers that
 // path itself, pinned at the top.
 //
-//	✦ starfield › new session
+//	✦ projects › new session
 //
 //	        ╭─ new session ──────────────────────────────────────────╮
 //	        │ ❯ sta▏                                           3/41 │

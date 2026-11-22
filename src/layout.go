@@ -9,7 +9,7 @@ import (
 
 // Shared layout for the list screens (sessions, picker):
 //
-//	✦ starfield › /query          ● 3 running · ◌ 1 external · ○ 24 stopped  [all]
+//	✦ projects › /query           ● 3 running · ◌ 1 external · ○ 24 stopped  [all]
 //
 //	grid of cards (cards.go), full width, fills the remaining height
 //
@@ -67,11 +67,11 @@ func pageWidth(windowWidth int) int {
 	return max(20, windowWidth-2*pageMargin)
 }
 
-// renderHeader draws "✦ starfield › crumb › crumb" on the left and info on
+// renderHeader draws "✦ projects › crumb › crumb" on the left and info on
 // the right, spanning width.
 func renderHeader(width int, info string, crumbs ...string) string {
 	sep := mutedStyle.Render(" › ")
-	left := brandStyle.Render("✦ starfield")
+	left := brandStyle.Render("✦ projects")
 	for i, c := range crumbs {
 		style := mutedStyle
 		if i == len(crumbs)-1 {

@@ -77,6 +77,17 @@ func TestHomeListsProjectsNotSessions(t *testing.T) {
 	}
 }
 
+func TestBreadcrumbStartsAtProjects(t *testing.T) {
+	m := homeLoaded(t, &fakeOps{}, 120, 22, twoProjects(time.Now())) // no banner
+	if first := strings.Split(plain(m.View()), "\n")[0]; !strings.Contains(first, "✦ projects") || strings.Contains(first, "starfield") {
+		t.Errorf("projects view breadcrumb = %q; want it to start at projects", first)
+	}
+	next, _ := m.Update(keyMsg("n"))
+	if v := plain(next.(pickerModel).View()); !strings.Contains(v, "✦ projects › new session") {
+		t.Errorf("picker breadcrumb should be projects › new session:\n%s", v)
+	}
+}
+
 func TestProjectCardSummarisesItsSessions(t *testing.T) {
 	now := time.Now()
 	ps := groupProjects(twoProjects(now))
@@ -114,8 +125,8 @@ func TestEnterOpensProjectSessions(t *testing.T) {
 	if strings.Join(ids, ",") != "r1,s2" {
 		t.Errorf("sessions = %v; want [r1 s2]", ids)
 	}
-	if v := plain(m.View()); !strings.Contains(v, "✦ starfield › alpha") {
-		t.Errorf("header should name the project:\n%s", strings.Split(v, "\n")[0])
+	if v := plain(m.View()); !strings.Contains(v, "✦ projects › alpha") {
+		t.Errorf("breadcrumb should be projects › alpha:\n%s", strings.Split(v, "\n")[0])
 	}
 }
 
