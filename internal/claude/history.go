@@ -131,7 +131,8 @@ func ParseSessionFile(path string) (HistorySession, error) {
 					s.UserMessages++
 				}
 			case "assistant":
-				if r.Message.Model != "" {
+				// Skip placeholders such as "<synthetic>" (not a real model).
+				if r.Message.Model != "" && !strings.HasPrefix(r.Message.Model, "<") {
 					s.Model = strings.TrimPrefix(r.Message.Model, "claude-")
 				}
 			case "custom-title":

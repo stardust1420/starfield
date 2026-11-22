@@ -80,11 +80,12 @@ func isManagedLive(st sessions.State) bool {
 }
 
 func dirHeading(dir, home string, running int) gridEntry {
-	name := filepath.Base(dir)
+	// Dir is kept raw for tmux; sanitize it only for display.
+	name := sessions.Sanitize(filepath.Base(dir))
 	if dir == "" {
 		name = "(unknown directory)"
 	}
-	meta := mutedStyle.Render(tildePath(dir, home))
+	meta := mutedStyle.Render(sessions.Sanitize(tildePath(dir, home)))
 	if running > 0 {
 		meta += dotSep + runningStyle.Render(strconv.Itoa(running)+" running")
 	}

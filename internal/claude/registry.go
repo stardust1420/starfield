@@ -26,11 +26,16 @@ type registryFile struct {
 	StartedAt int64  `json:"startedAt"` // epoch milliseconds
 	Name      string `json:"name"`
 	Status    string `json:"status"`
+	ProcStart string `json:"procStart"` // ps lstart format, e.g. "Sun Nov 22 11:28:31 2026"
+	Kind      string `json:"kind"`      // "interactive" for a terminal session
 }
 
-// ReadRegistry lists live sessions, keeping only those whose PID is a claude
-// process in table. A missing directory yields (nil, nil); unreadable or
-// malformed files are skipped.
+// ReadRegistry lists live interactive sessions (kind "interactive" or unset;
+// `claude -p` and SDK children are skipped) whose process is still alive in
+// table: same PID and, when both sides know it, the same start time
+// (procs.SameStart: procStart is UTC, ps prints local time), else a
+// claude (or node) process. A missing directory yields (nil, nil);
+// unreadable or malformed files are skipped.
 func ReadRegistry(sessionsDir string, table procs.Table) ([]LiveSession, error) {
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
@@ -52,7 +57,10 @@ func ReadRegistry(sessionsDir string, table procs.Table) ([]LiveSession, error) 
 		if json.Unmarshal(data, &rf) != nil || rf.PID == 0 {
 			continue
 		}
-		if !table.IsClaude(rf.PID) {
+		if rf.Kind != "" && rf.Kind != "interactive" {
+			continue
+		}
+		if !alive(rf, table) {
 			continue
 		}
 		out = append(out, LiveSession{
@@ -62,4 +70,18 @@ func ReadRegistry(sessionsDir string, table procs.Table) ([]LiveSession, error) 
 		})
 	}
 	return out, nil
+}
+
+// alive reports whether the registry entry's process is the one in table.
+// The start time rules out a PID reused by another process; without it,
+// the command name has to look like Claude.
+func alive(rf registryFile, table procs.Table) bool {
+	p, ok := table[rf.PID]
+	if !ok {
+		return false
+	}
+	if rf.ProcStart != "" && p.Start != "" {
+		return procs.SameStart(rf.ProcStart, p.Start)
+	}
+	return table.IsClaude(rf.PID)
 }

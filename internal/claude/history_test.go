@@ -245,3 +245,21 @@ func TestHistoryCacheReusesUnchangedFile(t *testing.T) {
 		t.Errorf("cache not pruned: %d", len(cache.entries))
 	}
 }
+
+func TestParseSessionFileSkipsSyntheticModel(t *testing.T) {
+	p := filepath.Join(t.TempDir(), basicID+".jsonl")
+	body := `{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-11-21T13:40:54.043Z","cwd":"/x","sessionId":"` + basicID + `","turnOrigin":"human"}
+{"type":"assistant","message":{"model":"claude-opus-5-5","role":"assistant"},"timestamp":"2026-11-21T13:41:00.000Z","cwd":"/x","sessionId":"` + basicID + `"}
+{"type":"assistant","message":{"model":"<synthetic>","role":"assistant"},"timestamp":"2026-11-21T13:42:00.000Z","cwd":"/x","sessionId":"` + basicID + `"}
+`
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParseSessionFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Model != "opus-5-5" {
+		t.Errorf("Model = %q; want opus-5-5", s.Model)
+	}
+}

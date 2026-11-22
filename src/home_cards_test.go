@@ -235,3 +235,15 @@ func TestDiscoveryErrorKeepsPreviousSessions(t *testing.T) {
 		t.Errorf("status after a clean discovery = %q; want cleared", m.status.text)
 	}
 }
+
+func TestDirHeadingStripsControlSequences(t *testing.T) {
+	e := dirHeading("/w/ev\x1b[2Jil\x07", "/home/me", 0)
+	for _, s := range []string{e.title, e.meta} {
+		if strings.Contains(s, "\x1b[2J") || strings.Contains(s, "\x07") {
+			t.Errorf("heading keeps control sequences: %q", s)
+		}
+	}
+	if e.title != "evil" {
+		t.Errorf("title = %q", e.title)
+	}
+}

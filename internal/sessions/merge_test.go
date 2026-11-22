@@ -199,3 +199,93 @@ func TestMergeDedupesLiveSessionsWithSameID(t *testing.T) {
 		t.Fatalf("newest preference: %+v", got)
 	}
 }
+
+func TestSanitize(t *testing.T) {
+	for in, want := range map[string]string{
+		"\x1b[2Jhi\x07\u009b31m":       "hi31m",
+		"a\tb\nc\r":                    "a b c ",
+		"plain ✦ text":                 "plain ✦ text",
+		"del\x7fete\u0085x":            "deletex",
+		"\x1b]0;title\x07after":        "after",
+		"\x1b[31mred\x1b[0m and \x00z": "red and z",
+	} {
+		if got := Sanitize(in); got != want {
+			t.Errorf("Sanitize(%q) = %q; want %q", in, got, want)
+		}
+	}
+}
+
+func TestMergeSanitizesText(t *testing.T) {
+	evil := "\x1b[2Jhi\x07\u009b"
+	hist := []claude.HistorySession{{ID: "a", Dir: "/d\x1b", Title: evil, LastPrompt: evil, Branch: "m\x07ain", Model: "op\x07us", LastActive: t0}}
+	live := []claude.LiveSession{{PID: 20, SessionID: "x", Name: evil, Status: "id\x1ble", StartedAt: t0}}
+	got := Merge(hist, live, nil, testTable())
+	a, _ := byID(got, "a")
+	if a.Title != "hi" || a.LastPrompt != "hi" || a.Branch != "main" || a.Model != "opus" {
+		t.Errorf("history fields not sanitized: %+v", a)
+	}
+	if a.Dir != "/d\x1b" {
+		t.Errorf("Dir must stay as is (used for tmux): %q", a.Dir)
+	}
+	x, _ := byID(got, "x")
+	if x.Title != "hi" {
+		t.Errorf("registry name not sanitized: %q", x.Title)
+	}
+}
+
+// Two live sessions under one pane: the shallow one is the pane's own
+// session (ClaudeID matches), the nested one is a child claude with another
+// id. The matching one must get the pane whatever the registry order.
+func TestMergePaneGoesToBestMatch(t *testing.T) {
+	table := procs.Table{
+		10: {PID: 10, PPID: 1, Comm: "zsh"},
+		11: {PID: 11, PPID: 10, Comm: "caffeinate"},
+		12: {PID: 12, PPID: 11, Comm: "claude"},
+		13: {PID: 13, PPID: 12, Comm: "claude"},
+	}
+	panes := []tmux.Pane{{Session: "sf-a", PanePID: 10, ClaudeID: "a"}}
+	shallow := claude.LiveSession{PID: 12, SessionID: "a", StartedAt: t0}
+	nested := claude.LiveSession{PID: 13, SessionID: "b", StartedAt: t0}
+	for _, live := range [][]claude.LiveSession{{nested, shallow}, {shallow, nested}} {
+		got := Merge(nil, live, panes, table)
+		a, _ := byID(got, "a")
+		b, _ := byID(got, "b")
+		if a.State != Running || a.TmuxName != "sf-a" {
+			t.Errorf("order %v: a = %+v; want Running in sf-a", live, a)
+		}
+		if b.State != External || b.TmuxName != "" {
+			t.Errorf("order %v: b = %+v; want External", live, b)
+		}
+		if len(got) != 2 {
+			t.Errorf("got %+v", got)
+		}
+	}
+}
+
+// Without an id match, the pane's own pid wins, then the shallowest process.
+func TestMergePaneFallsBackToPIDThenDepth(t *testing.T) {
+	table := procs.Table{
+		10: {PID: 10, PPID: 1, Comm: "claude"},
+		11: {PID: 11, PPID: 10, Comm: "claude"},
+		12: {PID: 12, PPID: 11, Comm: "claude"},
+	}
+	panes := []tmux.Pane{{Session: "sf-z", PanePID: 10, ClaudeID: "z"}}
+	l10 := claude.LiveSession{PID: 10, SessionID: "p", StartedAt: t0}
+	l11 := claude.LiveSession{PID: 11, SessionID: "q", StartedAt: t0}
+	l12 := claude.LiveSession{PID: 12, SessionID: "r", StartedAt: t0}
+	for _, live := range [][]claude.LiveSession{{l12, l11, l10}, {l10, l11, l12}} {
+		got := Merge(nil, live, panes, table)
+		if p, _ := byID(got, "p"); p.State != Running {
+			t.Errorf("pane pid should win: %+v", got)
+		}
+	}
+	for _, live := range [][]claude.LiveSession{{l12, l11}, {l11, l12}} {
+		got := Merge(nil, live, panes, table)
+		if q, _ := byID(got, "q"); q.State != Running {
+			t.Errorf("shallowest should win: %+v", got)
+		}
+		if r, _ := byID(got, "r"); r.State != External {
+			t.Errorf("deeper should be External: %+v", got)
+		}
+	}
+}
