@@ -1,0 +1,210 @@
+package src
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stardust1420/starfield/internal/sessions"
+)
+
+var cardNow = time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+
+func plain(s string) string { return sgr.ReplaceAllString(s, "") }
+
+func TestSessionEntriesGroupsByDirWithHeadings(t *testing.T) {
+	ss := []sessions.Session{
+		{ID: "a", Dir: "/home/me/Developer/starfield", Title: "A", State: sessions.Running},
+		{ID: "b", Dir: "/home/me/Developer/stardocker", Title: "B", State: sessions.External},
+		{ID: "c", Dir: "/home/me/Developer/starfield", Title: "C", State: sessions.Stopped},
+	}
+	entries, items := sessionEntries(ss, cardNow, "/home/me")
+
+	wantHeading := []bool{true, false, false, true, false}
+	wantItem := []string{"", "a", "c", "", "b"}
+	if len(entries) != len(wantHeading) || len(items) != len(entries) {
+		t.Fatalf("got %d entries, %d items; want %d of each", len(entries), len(items), len(wantHeading))
+	}
+	for i, e := range entries {
+		if e.heading != wantHeading[i] {
+			t.Fatalf("entry %d heading = %v; want %v", i, e.heading, wantHeading[i])
+		}
+		if e.heading {
+			if e.selectable {
+				t.Errorf("heading %d is selectable", i)
+			}
+			if items[i] != nil {
+				t.Errorf("items[%d] = %v; want nil for a heading", i, items[i])
+			}
+			continue
+		}
+		if !e.selectable {
+			t.Errorf("card %d is not selectable", i)
+		}
+		if items[i] == nil || items[i].ID != wantItem[i] {
+			t.Fatalf("items[%d] = %v; want session %q", i, items[i], wantItem[i])
+		}
+	}
+
+	if got := entries[0].title; got != "starfield" {
+		t.Errorf("first heading title = %q; want starfield", got)
+	}
+	meta := plain(entries[0].meta)
+	if !strings.Contains(meta, "~/Developer/starfield") || !strings.Contains(meta, "1 running") {
+		t.Errorf("first heading meta = %q; want the ~ path and 1 running", meta)
+	}
+	if meta := plain(entries[3].meta); strings.Contains(meta, "running") {
+		t.Errorf("second heading meta = %q; external sessions are not counted as running", meta)
+	}
+}
+
+func TestCardBodyPerState(t *testing.T) {
+	cases := []struct {
+		name string
+		s    sessions.Session
+		want string
+	}{
+		{"idle", sessions.Session{State: sessions.Running, Status: "idle", Started: cardNow.Add(-2 * time.Hour)}, "● idle · up 2h"},
+		{"busy", sessions.Session{State: sessions.Running, Status: "busy", Started: cardNow.Add(-2 * time.Hour)}, "◐ working · up 2h"},
+		{"starting", sessions.Session{State: sessions.Starting}, "◔ starting…"},
+		{"external", sessions.Session{State: sessions.External, PID: 11435}, "◌ external · pid 11435"},
+		{"stopped", sessions.Session{State: sessions.Stopped, LastActive: cardNow.Add(-3 * time.Hour)}, "○ 3h ago"},
+		{"stopped just now", sessions.Session{State: sessions.Stopped, LastActive: cardNow.Add(-10 * time.Second)}, "○ just now"},
+	}
+	for _, c := range cases {
+		c.s.ID, c.s.Dir, c.s.Title = "id", "/x", "T"
+		c.s.Branch, c.s.Model, c.s.LastPrompt = "main", "opus-5-5", "fix the bug"
+		c.s.CostUSD, c.s.UserMessages = 10.22, 133
+		body := sessionCard(c.s, cardNow, "", glyphBusy).body
+		if len(body) != 4 {
+			t.Fatalf("%s: %d body lines; want 4: %q", c.name, len(body), body)
+		}
+		if got := plain(body[3]); got != c.want {
+			t.Errorf("%s: line 4 = %q; want %q", c.name, got, c.want)
+		}
+	}
+
+	s := sessions.Session{ID: "id", Title: "T", Branch: "main", Model: "opus-5-5", LastPrompt: "fix the bug", CostUSD: 10.22, UserMessages: 133, State: sessions.Stopped, LastActive: cardNow}
+	body := sessionCard(s, cardNow, "", glyphBusy).body
+	for i, want := range []string{"⎇ main · opus-5-5", `"fix the bug"`, "$10.22 · 133 msgs"} {
+		if got := plain(body[i]); got != want {
+			t.Errorf("line %d = %q; want %q", i+1, got, want)
+		}
+	}
+}
+
+func TestCardCostLine(t *testing.T) {
+	cases := []struct {
+		cost      float64
+		msgs      int
+		truncated bool
+		want      string // "" means the line is left out
+	}{
+		{10.22, 133, false, "$10.22 · 133 msgs"},
+		{10.22, 133, true, "$10.22"},
+		{0, 1, false, "1 msg"},
+		{0, 5, true, ""},
+		{0, 0, false, ""},
+	}
+	for _, c := range cases {
+		s := sessions.Session{ID: "id", Title: "T", State: sessions.Starting, CostUSD: c.cost, UserMessages: c.msgs, Truncated: c.truncated}
+		body := sessionCard(s, cardNow, "", glyphBusy).body
+		got := ""
+		if len(body) == 2 {
+			got = plain(body[0])
+		}
+		if got != c.want || (c.want == "" && len(body) != 1) {
+			t.Errorf("cost %v msgs %d truncated %v: body %q; want cost line %q", c.cost, c.msgs, c.truncated, body, c.want)
+		}
+	}
+}
+
+func TestCardOmitsMissingFields(t *testing.T) {
+	s := sessions.Session{ID: "id", Title: "T", LastPrompt: "hello", State: sessions.Stopped, LastActive: cardNow.Add(-time.Hour)}
+	body := sessionCard(s, cardNow, "", glyphBusy).body
+	want := []string{`"hello"`, "○ 1h ago"}
+	if len(body) != len(want) {
+		t.Fatalf("body = %q; want %q", body, want)
+	}
+	for i := range want {
+		if got := plain(body[i]); got != want[i] {
+			t.Errorf("line %d = %q; want %q", i+1, got, want[i])
+		}
+	}
+
+	// A prompt that is already the title isn't repeated.
+	s = sessions.Session{ID: "id", Title: "hello", LastPrompt: "hello", State: sessions.Starting}
+	if body := sessionCard(s, cardNow, "", glyphBusy).body; len(body) != 1 {
+		t.Errorf("body = %q; want only the state line", body)
+	}
+}
+
+func TestRunningOnlyFilter(t *testing.T) {
+	ss := []sessions.Session{
+		{ID: "r", Title: "run", State: sessions.Running},
+		{ID: "s", Title: "start", State: sessions.Starting},
+		{ID: "e", Title: "ext", State: sessions.External},
+		{ID: "x", Title: "old", State: sessions.Stopped},
+	}
+	ids := func(ss []sessions.Session) string {
+		var b strings.Builder
+		for _, s := range ss {
+			b.WriteString(s.ID)
+		}
+		return b.String()
+	}
+	if got := ids(filterSessions(ss, false, "")); got != "rsex" {
+		t.Errorf("all = %q; want rsex", got)
+	}
+	if got := ids(filterSessions(ss, true, "")); got != "rse" {
+		t.Errorf("running only = %q; want rse", got)
+	}
+}
+
+func TestFilterMatchesTitleDirBranchPrompt(t *testing.T) {
+	ss := []sessions.Session{
+		{ID: "1", Title: "Refactor parser"},
+		{ID: "2", Dir: "/src/parser"},
+		{ID: "3", Branch: "feat/parser"},
+		{ID: "4", LastPrompt: "the PARSER breaks"},
+		{ID: "5", Title: "other", Model: "parser"}, // model isn't searched
+	}
+	if got := len(filterSessions(ss, false, "parser")); got != 4 {
+		t.Errorf("matched %d; want 4", got)
+	}
+}
+
+func TestRelTime(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{-time.Minute, "just now"},
+		{30 * time.Second, "just now"},
+		{5 * time.Minute, "5m"},
+		{3*time.Hour + 59*time.Minute, "3h"},
+		{2 * 24 * time.Hour, "2d"},
+		{3 * 7 * 24 * time.Hour, "3w"},
+		{125 * 24 * time.Hour, "4mo"},
+		{800 * 24 * time.Hour, "2y"},
+	}
+	for _, c := range cases {
+		if got := relTime(c.d); got != c.want {
+			t.Errorf("relTime(%v) = %q; want %q", c.d, got, c.want)
+		}
+	}
+}
+
+func TestTildePath(t *testing.T) {
+	cases := map[string]string{
+		"/home/me":              "~",
+		"/home/me/Developer/sf": "~/Developer/sf",
+		"/home/meow":            "/home/meow",
+		"/tmp":                  "/tmp",
+	}
+	for in, want := range cases {
+		if got := tildePath(in, "/home/me"); got != want {
+			t.Errorf("tildePath(%q) = %q; want %q", in, got, want)
+		}
+	}
+}

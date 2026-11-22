@@ -1,7 +1,6 @@
 package src
 
 import (
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -10,14 +9,14 @@ import (
 
 // Shared layout for the list screens (sessions, picker):
 //
-//	✦ starfield › Containers                       ● 3 running  ○ 1 stopped
+//	✦ starfield › /query          ● 3 running · ◌ 1 external · ○ 24 stopped  [all]
 //
 //	grid of cards (cards.go), full width, fills the remaining height
 //
-//	╭─ Delete web? ──────────────────────────────────────────────────────────╮
-//	│ the red confirmation panel, only while a delete or prune is pending   │
-//	╰────────────────────────────────────────────────────────────────────────╯
-//	  help keys                                               status message
+//	╭─ stop Fix tmux status bar? ─────────────────────────────────────────────╮
+//	│ the red confirmation panel, only while a prompt is open                 │
+//	╰─────────────────────────────────────────────────────────────────────────╯
+//	  help keys                                                 status message
 //
 // Every block spans the window minus pageMargin on each side, and text
 // starts at pageMargin + textIndent.
@@ -28,12 +27,11 @@ const (
 	detailsLines = 4 // content lines inside the confirmation panel
 )
 
-// Palette. Coral is the brand and focus colour; the dark steel marks the
-// selected row; green means running. Grey carries structure and secondary
-// text so the colours stay meaningful.
+// Palette. Coral is the brand and focus colour; green means running, steel
+// blue means running in another terminal. Grey carries structure and
+// secondary text so the colours stay meaningful.
 var (
 	colorAccent   = lipgloss.Color("#d97757") // Claude coral
-	colorSteel    = lipgloss.Color("#2f4f6f") // selected row
 	colorRunning  = lipgloss.Color("#5fd787") // signal green
 	colorExternal = lipgloss.Color("#7aa2f7") // steel blue: sessions in other terminals
 	colorDanger   = lipgloss.Color("#ff5f5f")
@@ -88,12 +86,6 @@ func renderHeader(width int, info string, crumbs ...string) string {
 		gap = max(2, width-lipgloss.Width(left)-lipgloss.Width(info)-textIndent)
 	}
 	return left + strings.Repeat(" ", gap) + info
-}
-
-// stateCounts renders "● 3 running  ○ 1 stopped" for the header.
-func stateCounts(running, stopped int) string {
-	return runningStyle.Render(glyphRunning) + " " + crumbStyle.Render(strconv.Itoa(running)) + mutedStyle.Render(" running") +
-		"   " + mutedStyle.Render(glyphStopped+" ") + crumbStyle.Render(strconv.Itoa(stopped)) + mutedStyle.Render(" stopped")
 }
 
 // renderPanelColored draws a rounded box spanning width with the title set

@@ -93,3 +93,34 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{k.Left, k.Help},
 	}
 }
+
+// homeKeyMap is the help of the home screen. Its short help is compact so
+// a status message still fits beside it at 80 columns. Tasks that add
+// session actions (enter, n, x, p) append their bindings to actions.
+type homeKeyMap struct {
+	keyMap
+	Move        key.Binding // short form of keyMap.Up
+	HelpShort   key.Binding // short form of keyMap.Help
+	RunningOnly key.Binding
+	actions     []key.Binding
+}
+
+var homeKeys = homeKeyMap{
+	keyMap:      keys,
+	Move:        key.NewBinding(key.WithKeys("up", "down", "left", "right"), key.WithHelp("←↑↓→", "move")),
+	HelpShort:   key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+	RunningOnly: key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "all/running")),
+}
+
+func (k homeKeyMap) ShortHelp() []key.Binding {
+	short := append([]key.Binding{k.Move}, k.actions...)
+	return append(short, k.RunningOnly, filterKey, k.HelpShort, quitKey)
+}
+
+func (k homeKeyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Up, k.Down},
+		append(append([]key.Binding{}, k.actions...), k.RunningOnly),
+		{filterKey, k.Help, quitKey},
+	}
+}

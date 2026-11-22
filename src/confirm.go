@@ -8,10 +8,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// confirmPrompt is a pending destructive action. While one is set, the
-// details panel turns into a red confirmation box and only y / n / esc are
-// handled. The action is captured when the prompt opens, so the refresh
-// moving the cursor can't change what gets deleted.
+// confirmPrompt is a pending destructive action (stopping a session). While
+// one is set, a red confirmation box sits under the grid and only y / n /
+// esc are handled. The action is captured when the prompt opens, so the
+// refresh moving the cursor can't change its target.
 type confirmPrompt struct {
 	title    string   // the question, e.g. "Delete my-session?"
 	lines    []string // what will happen
@@ -20,8 +20,8 @@ type confirmPrompt struct {
 	run      tea.Cmd
 }
 
-// actionMsg reports the result of an async action on the volumes,
-// networks or images screens. done is the success message.
+// actionMsg reports the result of an async action confirmed through a
+// prompt. done is the success message.
 type actionMsg struct {
 	err  error
 	done string

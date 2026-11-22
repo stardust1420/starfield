@@ -7,22 +7,25 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// The list screens show their items as a grid of cards, like the home
-// screen. Cards are grouped into sections by full-width headings (a compose
-// stack, "Standalone"); a heading can be selectable, so stack actions still
-// have something to act on.
+// The list screens show their items as a grid of cards. Cards are grouped
+// into sections by full-width headings (a directory on the home screen); a
+// heading can be selectable, but the home screen's are not, so the cursor
+// only visits cards.
 //
-//	◐ ▾ starfield-demo   2 of 3 running
-//	┏━━━━━━━━━━━━━━━━━━━━━━━━┓   ╭────────────────────────╮
-//	┃                        ┃   │                        │
-//	┃  ● starfield-web-1    ┃   │  ● starfield-db-1     │
-//	┃                        ┃   │                        │
-//	┃    alpine:3.20         ┃   │    alpine:3.20         │
-//	┃    8081→80/tcp         ┃   │    5434→5432/tcp       │
-//	┃    0.0% CPU   484KiB   ┃   │    0.1% CPU   12MiB    │
-//	┃    Up 13 seconds       ┃   │    Up 2 hours          │
-//	┃                        ┃   │                        │
-//	┗━━━━━━━━━━━━━━━━━━━━━━━━┛   ╰────────────────────────╯
+//	▸ starfield   ~/Developer/starfield · 1 running
+//	┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓   ╭────────────────────────────╮
+//	┃                            ┃   │                            │
+//	┃  Home screen with cards    ┃   │  Fix tmux status bar       │
+//	┃                            ┃   │                            │
+//	┃  ⎇ main · opus-5-5         ┃   │  ⎇ main · opus-5-5         │
+//	┃  "add the session grid"    ┃   │  "theme the status bar"    │
+//	┃  $10.22 · 133 msgs         ┃   │  $1.80                     │
+//	┃  ◐ working · up 2h         ┃   │  ○ 3h ago                  │
+//	┃                            ┃   │                            │
+//	┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛   ╰────────────────────────────╯
+//
+// A card with a glyph puts it before the title and indents the body under
+// the title; without one, title and body start at the same column.
 //
 // Body lines are one fact each; builders leave out what doesn't apply
 // rather than leaving a blank line in the middle.
@@ -76,7 +79,7 @@ func (r gridRow) height() int {
 }
 
 // bodyLines is how many body lines the cards of a row need, so a row of
-// stopped containers isn't padded out to the height of a running one.
+// sparse cards isn't padded out to the height of a full one.
 func (g gridView) bodyLines(entries []int) int {
 	n := 1
 	for _, i := range entries {
@@ -311,7 +314,7 @@ var (
 	gridSelectedCardStyle = gridCardStyle.Border(lipgloss.ThickBorder()).BorderForeground(colorAccent)
 	gridTitleStyle        = lipgloss.NewStyle().Bold(true).Foreground(colorText)
 	gridSelectedStyle     = lipgloss.NewStyle().Bold(true).Foreground(colorAccent)
-	gridHeadingStyle      = lipgloss.NewStyle().Foreground(colorMuted)
+	gridHeadingStyle      = lipgloss.NewStyle().Bold(true).Foreground(colorText)
 )
 
 // view renders the visible part of the grid, exactly g.height lines tall.
@@ -387,14 +390,18 @@ func (g gridView) renderCard(i, width, bodyLines int) string {
 	}
 	inner := max(1, width-6) // border + padding
 
-	title := titleStyle.Render(truncate(e.title, max(1, inner-lipgloss.Width(e.glyph)-1)))
-	lines := []string{e.glyph + " " + title, ""}
+	prefix, indent := "", ""
+	if e.glyph != "" {
+		prefix, indent = e.glyph+" ", "  "
+	}
+	title := titleStyle.Render(truncate(e.title, max(1, inner-lipgloss.Width(prefix))))
+	lines := []string{prefix + title, ""}
 	for b := range bodyLines {
 		line := ""
 		if b < len(e.body) {
-			line = ansiTruncate(e.body[b], max(1, inner-2))
+			line = ansiTruncate(e.body[b], max(1, inner-len(indent)))
 		}
-		lines = append(lines, "  "+line)
+		lines = append(lines, indent+line)
 	}
 	return style.Width(width - 2).Render(strings.Join(lines, "\n"))
 }
@@ -425,17 +432,7 @@ func renderGridPage(header, grid, panel, bottom string) string {
 	return lipgloss.JoinVertical(lipgloss.Left, blocks...)
 }
 
-// Body line helpers shared by the card builders.
-
-// valueLabel renders "value label" with the value bright and the label grey,
-// e.g. "0.4% CPU".
-func valueLabel(value, label string) string {
-	return lipgloss.NewStyle().Foreground(colorText).Render(value) + mutedStyle.Render(" "+label)
-}
-
-func textLine(s string) string { return lipgloss.NewStyle().Foreground(colorText).Render(s) }
-
-// glyphFor colours a state glyph: green when running or in use.
+// glyphFor colours a state glyph by the state it stands for.
 func glyphFor(g string) string {
 	switch g {
 	case glyphRunning:

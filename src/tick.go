@@ -21,8 +21,11 @@ func newTickID() int {
 	return int(lastTickID.Add(1))
 }
 
+// refreshInterval is how often a screen refreshes its data.
+const refreshInterval = 2 * time.Second
+
 func tickCmd(id int) tea.Cmd {
-	return tea.Tick(time.Second*1, func(t time.Time) tea.Msg {
+	return tea.Tick(refreshInterval, func(t time.Time) tea.Msg {
 		return tickMsg{id: id, t: t}
 	})
 }

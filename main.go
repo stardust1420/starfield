@@ -10,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/stardust1420/starfield/internal/config"
+	"github.com/stardust1420/starfield/internal/sessions"
+	"github.com/stardust1420/starfield/internal/tmux"
 	"github.com/stardust1420/starfield/src"
 )
 
@@ -73,7 +75,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "starfield: %v\n", err)
 		os.Exit(1)
 	}
-	deps := src.Deps{Cfg: config.Load(os.Getenv, home)}
+	cfg := config.Load(os.Getenv, home)
+	tm, err := tmux.New(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "starfield: %v\n", err)
+		os.Exit(1)
+	}
+	deps := src.Deps{Cfg: cfg, Tmux: tm, Disc: sessions.NewDiscoverer(cfg, tm)}
 
 	p := tea.NewProgram(src.InitHomeModel(deps, 0, 0), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {

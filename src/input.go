@@ -58,16 +58,7 @@ func (f textField) view() string {
 	return crumbStyle.Render(f.value) + lipgloss.NewStyle().Background(colorAccent).Render(" ")
 }
 
-// numberField accepts digits and one decimal point.
-type numberField = textField
-
-func newRangeInput() numberField {
-	return textField{limit: 7, accept: func(r rune, v string) bool {
-		return (r >= '0' && r <= '9') || (r == '.' && !strings.Contains(v, "."))
-	}}
-}
-
-// filterBar is the "/" filter of a list screen or the logs view. While
+// filterBar is the "/" filter of a list screen. While
 // editing, it takes every key; the query applies as it's typed. Enter keeps
 // it and returns to the list, esc clears it.
 type filterBar struct {

@@ -3,7 +3,6 @@ package src
 import (
 	"math"
 	"math/rand/v2"
-	"os"
 	"strings"
 	"time"
 
@@ -22,18 +21,13 @@ const (
 	clearMarginY  = 1                      // empty rows kept around the content
 )
 
-// frameMsg advances the animation of the home screen with the same id.
+// frameMsg advances the animation of the home screen with the same id. With
+// Config.ReducedMotion the home screen never starts the frame loop, so the
+// sky is drawn but stays still.
 type frameMsg struct{ id int }
 
 func frameCmd(id int) tea.Cmd {
 	return tea.Tick(frameInterval, func(time.Time) tea.Msg { return frameMsg{id: id} })
-}
-
-// reducedMotion freezes the sky (stars stay, nothing moves) when
-// STARFIELD_REDUCED_MOTION is set to anything but "" or "0".
-func reducedMotion() bool {
-	v := os.Getenv("STARFIELD_REDUCED_MOTION")
-	return v != "" && v != "0"
 }
 
 type starLayer struct {
