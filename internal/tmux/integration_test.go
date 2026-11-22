@@ -49,6 +49,34 @@ func TestTmuxLifecycle(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
+	// The conf must actually have been applied: tmux starts the server even
+	// when a conf line is malformed.
+	show := func(args ...string) string {
+		out, err := c.do(args...)
+		if err != nil {
+			t.Fatalf("%v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if msgs := show("show-messages"); strings.Contains(msgs, "tmux.conf") {
+		t.Errorf("conf errors: %s", msgs)
+	}
+	if got := show("show-options", "-gv", "prefix"); got != "None" {
+		t.Errorf("prefix = %q, want None", got)
+	}
+	detachBound := false
+	for _, l := range strings.Split(show("list-keys", "-T", "root"), "\n") {
+		if strings.Contains(l, "C-]") && strings.Contains(l, "detach-client") {
+			detachBound = true
+		}
+	}
+	if !detachBound {
+		t.Error("C-] not bound to detach-client in root table")
+	}
+	if got := show("show-options", "-sv", "extended-keys"); got != "on" {
+		t.Errorf("extended-keys = %q, want on", got)
+	}
+
 	ps, err := c.List()
 	if err != nil {
 		t.Fatal(err)
