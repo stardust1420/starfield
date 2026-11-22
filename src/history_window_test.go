@@ -15,12 +15,12 @@ import (
 
 func tKey() tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("t")} }
 
-// fastStatus makes success statuses clear at once, so runAll doesn't wait
+// fastStatus makes success and error statuses clear at once, so runAll doesn't wait
 // out the real delay.
 func fastStatus(t *testing.T) {
-	orig := statusClearDelay
-	statusClearDelay = time.Millisecond
-	t.Cleanup(func() { statusClearDelay = orig })
+	orig, origErr := statusClearDelay, errorClearDelay
+	statusClearDelay, errorClearDelay = time.Millisecond, time.Millisecond
+	t.Cleanup(func() { statusClearDelay, errorClearDelay = orig, origErr })
 }
 
 func TestHistoryKeyCyclesTheWindow(t *testing.T) {

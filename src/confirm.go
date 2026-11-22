@@ -94,8 +94,13 @@ type statusLine struct {
 
 type clearStatusMsg struct{ seq int }
 
-// statusClearDelay is how long a success stays; a var so tests can shorten it.
-var statusClearDelay = 4 * time.Second
+// statusClearDelay is how long a success stays, and errorClearDelay an
+// error (longer, so there's time to read it); vars so tests can shorten
+// them. Progress messages ("starting…") stay until replaced.
+var (
+	statusClearDelay = 4 * time.Second
+	errorClearDelay  = 8 * time.Second
+)
 
 func (s statusLine) render() string {
 	switch {
@@ -110,16 +115,20 @@ func (s statusLine) render() string {
 	}
 }
 
-// set replaces the message and, for a success, returns a command that
-// clears it later.
+// set replaces the message and, for a success or an error, returns a
+// command that clears it later.
 func (s *statusLine) set(kind int, text string) tea.Cmd {
 	s.seq++
 	s.text, s.kind = text, kind
-	if kind != statusSuccess || text == "" {
+	delay := statusClearDelay
+	switch {
+	case text == "" || kind == statusProgress:
 		return nil
+	case kind == statusError:
+		delay = errorClearDelay
 	}
 	seq := s.seq
-	return tea.Tick(statusClearDelay, func(time.Time) tea.Msg {
+	return tea.Tick(delay, func(time.Time) tea.Msg {
 		return clearStatusMsg{seq: seq}
 	})
 }

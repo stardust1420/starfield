@@ -13,6 +13,7 @@ import (
 // Sessions whose history has no directory get an "(unknown directory)"
 // card; opening it must show them, not leave the view half switched.
 func TestUnknownDirectoryProjectOpensAndBacksOut(t *testing.T) {
+	fastStatus(t)
 	now := time.Now()
 	f := &fakeOps{}
 	m := homeLoaded(t, f, 120, 40, []sessions.Session{
@@ -164,5 +165,34 @@ func TestPickerChecksTypedPathsInACommand(t *testing.T) {
 	p = deliverChecks(p, cmd)
 	if !p.rows[0].bad {
 		t.Errorf("after its check the row is %+v; want bad", p.rows[0])
+	}
+}
+
+// Errors clear themselves too, later than successes; progress stays.
+func TestErrorStatusClearsAfterAWhile(t *testing.T) {
+	fastStatus(t)
+	m := InitHomeModel(Deps{Cfg: testCfg()}, 120, 30)
+	if errorClearDelay != time.Millisecond {
+		t.Fatal("fastStatus should shorten the error delay")
+	}
+	cmd := m.setStatus(statusError, "directory gone: /x")
+	if cmd == nil {
+		t.Fatal("an error should schedule its clear")
+	}
+	for _, msg := range runAll(cmd) {
+		next, _ := m.Update(msg)
+		m = next.(homeModel)
+	}
+	if m.status.text != "" {
+		t.Errorf("status = %q; want it cleared", m.status.text)
+	}
+	if m.setStatus(statusProgress, "starting…") != nil {
+		t.Error("a progress message should stay until replaced")
+	}
+}
+
+func TestErrorStaysLongerThanSuccess(t *testing.T) {
+	if errorClearDelay <= statusClearDelay {
+		t.Errorf("errors (%v) should stay longer than successes (%v)", errorClearDelay, statusClearDelay)
 	}
 }

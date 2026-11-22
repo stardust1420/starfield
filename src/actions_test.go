@@ -120,7 +120,7 @@ func TestStartFailureIsReported(t *testing.T) {
 	m := homeWith(t, f, sessions.Session{ID: "a", Dir: "/x", State: sessions.Stopped})
 	next, cmd := m.Update(msg)
 	m = next.(homeModel)
-	if cmd != nil || m.status.kind != statusError || m.status.text != "boom" {
+	if m.status.kind != statusError || m.status.text != "boom" {
 		t.Errorf("status = %q, cmd = %v", m.status.text, cmd)
 	}
 }
@@ -164,9 +164,12 @@ func TestResumeStoppedStartsSession(t *testing.T) {
 func TestEnterOnExternalDoesNotAttach(t *testing.T) {
 	f := &fakeOps{}
 	m := homeWith(t, f, sessions.Session{ID: testID, Dir: "/x", State: sessions.External, PID: 42})
+	fastStatus(t)
 	m, cmd := press(m, "enter")
-	if cmd != nil {
-		t.Errorf("enter on external returned a cmd")
+	for _, msg := range runAll(cmd) {
+		if _, ok := msg.(clearStatusMsg); !ok {
+			t.Errorf("enter on external produced %T; want only the status clear", msg)
+		}
 	}
 	if !regexp.MustCompile(`pid 42`).MatchString(m.status.text) {
 		t.Errorf("status = %q", m.status.text)
